@@ -482,13 +482,38 @@ window.__ModuleLoader__.load({
 
       fitRef.current = fit
 
+      /**
+       * Drag a node with window-level pointer listeners.
+       *
+       * React's synthetic pointermove only fires while the pointer stays inside the
+       * element that owns the handler; capturing the pointer on the node then leaves
+       * the canvas surface without events (the node simply did not move under a real
+       * mouse). Listening on window for the duration of the gesture removes that whole
+       * class of failure and keeps the math in world coordinates.
+       */
       const onNodePointerDown = (event, node) => {
         event.stopPropagation()
         onSelectBot(node.botId)
-        const point = toLocal(event)
-        const current = positions[node.botId] ?? { x: 0, y: 0 }
-        setDrag({ botId: node.botId, dx: point.x - (current.x * view.zoom + view.x), dy: point.y - (current.y * view.zoom + view.y) })
-        event.currentTarget.setPointerCapture?.(event.pointerId)
+        const start = toLocal(event)
+        const origin = positions[node.botId] ?? { x: 0, y: 0 }
+        const zoom = view.zoom
+        const move = (moveEvent) => {
+          const point = toLocal(moveEvent)
+          setPositions((current) => ({
+            ...current,
+            [node.botId]: { x: Math.round(origin.x + (point.x - start.x) / zoom), y: Math.round(origin.y + (point.y - start.y) / zoom) },
+          }))
+        }
+        const up = () => {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+          setPositions((current) => {
+            persist(current, view)
+            return current
+          })
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
       }
 
       const onPointerMove = (event) => {

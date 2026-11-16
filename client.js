@@ -546,7 +546,7 @@ window.__ModuleLoader__.load({
       const statuses = ['DRAFT', 'READY', 'ASSIGNED', 'RUNNING', 'IN_REVIEW', 'VERIFIED', 'BLOCKED', 'REWORK', 'DONE', 'CANCELLED']
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
         h('div', { style: S.card },
-          h('div', { style: S.row }, h('strong', { style: { fontSize: 13 } }, project.name), h(Badge, { value: project.status === 'active' ? 'DONE' : 'CANCELLED', label: project.status })),
+          h('div', { style: S.row }, h('strong', { style: { fontSize: 13 } }, project.name), h(Badge, { value: project.status === 'active' ? 'DONE' : 'CANCELLED', label: STATUS_LABEL[project.status.toUpperCase()] ?? project.status })),
           h('p', { style: S.muted }, project.goal === '' ? '未填写目标。' : project.goal),
           h('div', { style: S.row },
             h('span', { style: S.muted }, `仓库 ${project.repo_root}`),

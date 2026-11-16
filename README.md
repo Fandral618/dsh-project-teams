@@ -32,6 +32,23 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 或在 Harness 内：**插件 → 添加插件 → 本地目录**，选中本目录。
 详细步骤与自检见 [`docs/installation.md`](docs/installation.md)，运维/备份/回滚见 [`docs/runbook.md`](docs/runbook.md)。
 
+## 界面
+
+工作台是 DSH 主区域里的一个完整面板（左侧栏「项目团队」入口），全部数据来自宿主 API：
+
+| 总览 | 团队 | 任务 |
+| --- | --- | --- |
+| ![总览](docs/screenshots/01-overview.png) | ![团队](docs/screenshots/02-team.png) | ![任务](docs/screenshots/03-tasks.png) |
+
+| 交付 | 消息 | 决策 |
+| --- | --- | --- |
+| ![交付](docs/screenshots/04-delivery.png) | ![消息](docs/screenshots/05-messages.png) | ![决策](docs/screenshots/06-decisions.png) |
+
+设置（策略编辑、预算、M0 探针）：![设置](docs/screenshots/07-settings.png)
+
+截图来自本机 DSH Desktop 的真实运行（项目「演示·账号系统」），不是静态 mock：
+每个数字、每条消息、每次门禁结论都读自宿主数据库。截图里出现的本机路径是本项目演示机器的路径。
+
 ## 使用
 
 1. 左侧栏打开 **项目团队**（或 设置 → 插件 → 项目团队）。

@@ -151,3 +151,21 @@ node --test "tests/security/*.test.js"
 `ERR_MODULE_NOT_FOUND`。改为 `lib/host/dsh-tools.js`：优先用宿主实现，不可解析时回退到
 `lib/host/tool-def.js`（同契约的本地编译器：参数 DSL→JSON Schema、输出 schema、参数校验）。
 Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激活 —— 这正是重启验证得以完成的前提。
+
+## 七、界面实测（M6 的 UI 缺口已关闭）
+
+方法：在运行中的 Desktop 窗口上做真实交互取证 —— 由于本机 RDP 会话中途断开使屏幕 DC 失效，
+最终采用 **UI Automation**（`InvokePattern`，不需要鼠标输入）切换标签页 + **PrintWindow** 抓取窗口位图。
+全程只做「切换标签页」这类只读导航，没有点击任何会改状态的按钮。
+
+| 标签页 | 实测内容 | 截图 |
+| --- | --- | --- |
+| 总览 | 项目卡（目标/仓库/分支/状态计数 草稿3·完成1·已取消1）、进行中的运行、阻塞任务、需要你处理 2 项、活动记录（project.export / budget.write / task.edit / artifact.verify / task.claim 拒绝 等真实审计行） | `docs/screenshots/01-overview.png` |
+| 团队 | 4 个 Bot，独立 Session id + 复制按钮、预设 ops-ptc、存活状态「在线」、当前任务「空闲」、重新绑定 | `docs/screenshots/02-team.png` |
+| 任务 | 新建任务表单（标题/风险/依赖/描述/验收标准）+ 任务列表：T-1 已取消、T-4 完成·门禁通过、T-2/T-3/T-5 草稿，操作列（查看/提交/取消） | `docs/screenshots/03-tasks.png` |
+| 交付 | 工件 art_a38acef91d56（commit e3c5584、2 文件、diff sha256 011025a231a2）、4 条机器证据全部 `通过` exit 0 且带命令与日志路径、AI 评审记录含 5 条 nit/minor findings | `docs/screenshots/04-delivery.png` |
+| 消息 | 搜索框 + 线程/任务聚合提示；真实 PM↔开发者↔评审消息，状态「已处理」 | `docs/screenshots/05-messages.png` |
+| 决策 | 「等待 Owner 决定」：一条引擎的 `attention`（T-4 消息预算 40 用尽）+ **PM Bot 自己写的合并提案**（分支 pt/T-4/run_e4e9cd3bb470、门禁依据、已知限制、等待 owner 决定），带「批准/拒绝」 | `docs/screenshots/06-decisions.png` |
+| 设置 | 宿主事实（插件版本 1.1.0、Session 控制器 true、SQLite true、预设列表）、M0 探针按钮、可编辑的项目策略 JSON | `docs/screenshots/07-settings.png` |
+
+截图同时证明了两件事：UI 不是静态数据（所有值随宿主变化），以及**Bot 会主动写合并提案而不是自行合并**。

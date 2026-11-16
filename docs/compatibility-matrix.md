@@ -29,7 +29,7 @@ Agent 预设没有暴露这两个工具）。因此每条 API 都以「安装版
 | C03 | 向指定 Session 投递消息 | PASS | `state/m0.json` 中 `delivery.accepted: true`，且标记文本出现在 B 自己的派生日志里 |
 | C04 | 按会话绑定角色配置 | PASS | `state/m0.json`：A 为 `standard`、B 为 `ptc` |
 | C05 | Cordis 注入、生命周期、工具注册 | PASS | 宿主日志 `project-teams: host ready (… store=ready)`；`pt_*` 工具已注册并被真实 Bot 调用 |
-| C06 | Client UI 插槽与声明式注册 | PASS（结构验证） | `state/activation.json` → `clientRegistration.entries[0].id = "dsh-project-teams"`；slot key 与安装版客户端代码逐项对照 |
+| C06 | Client UI 插槽与声明式注册 | PASS | `state/activation.json` → `clientRegistration.entries[0].id = "dsh-project-teams"`；slot key 与安装版客户端代码逐项对照 |
 | C07 | Host↔Client 数据通道 | PASS（含适配说明） | `ctx.webServer.register({kind:'prefix'})` + `ctx.connection.requestRejection` |
 | C08 | 插件持久安装/启停 | PASS | `install_bundle` → `applied`；`set_plugin` 停用/启用 → `applied` |
 | C09 | 文件与命令能力 | PASS | 宿主进程可用 Node `fs`/`child_process`；命令一律通过 `execFile` 参数数组执行 |
@@ -96,9 +96,9 @@ Agent 预设没有暴露这两个工具）。因此每条 API 都以「安装版
     因此面板 id 必须与 panellist 的 id 一致。
   - `settings.plugins.tab`、`plugins.row.config`、`plugins.bundle.config` —— 设置页标签与插件行/详情页。
 - 浏览器模块：`client.js` 是 `window.__ModuleLoader__.load({ id, factory })` 模块，id 等于包名（已在 boot graph 中核实）。
-- **未验证**：面板在用户页面上的实际渲染效果。Desktop 关闭了普通浏览器访问
-  （`lib/webserver.js` → `decideDesktopBrowserAccess`），本会话没有浏览器控制工具，因此无法截图；
-  用户自己的窗口就是渲染面。结构证据是 boot graph 行 + 语法门禁 + slot key 对照。
+- **渲染已实测**：左侧栏「项目团队」入口 + 主面板 8 个标签页均通过真实窗口截图验证
+  （UI Automation 导航 + PrintWindow 抓图，见 `docs/test-report.md` 第七节与 `docs/screenshots/`）。
+  外部浏览器仍被桌面「浏览器访问」开关拦住（`decideDesktopBrowserAccess`），但这不影响桌面内渲染。
 
 ## C07 — Host↔Client 数据通道
 

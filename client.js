@@ -64,6 +64,30 @@ window.__ModuleLoader__.load({
       mono: 'var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
     }
 
+    /** Shared design tokens for the workspace shell (v1.1 U5). */
+    const TOKENS = {
+      radius: { sm: 6, md: 8, lg: 12 },
+      space: { xs: 4, sm: 6, md: 8, lg: 12 },
+      font: { xs: 10.5, sm: 11.5, md: 12.5, lg: 14 },
+      status: { ok: '#05603a', warn: '#b54708', err: '#b42318', info: '#175cd3', muted: '#475467' },
+    }
+
+    /**
+     * Current viewport width, so the workspace can degrade on narrow windows
+     * instead of squashing three fixed columns.
+     * @returns {number} window width in CSS pixels.
+     */
+    function useViewportWidth() {
+      const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1440 : window.innerWidth))
+      useEffect(() => {
+        if (typeof window === 'undefined') return undefined
+        const onResize = () => setWidth(window.innerWidth)
+        window.addEventListener('resize', onResize)
+        return () => window.removeEventListener('resize', onResize)
+      }, [])
+      return width
+    }
+
     const S = {
       page: { display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, height: '100%', padding: '4px 2px 16px' },
       header: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
@@ -372,7 +396,10 @@ window.__ModuleLoader__.load({
       const NODE_W = 208
       const NODE_H = 92
 
+      const fitted = useRef('')
+
       // Seed positions once per project: saved coordinates win, new Bots get a grid slot.
+      // After seeding, fit the view once so a first-time project is not off-screen.
       useEffect(() => {
         if (canvas === null || canvas === undefined) return
         const saved = new Map((canvas.layout?.nodes ?? []).map((node) => [node.botId, node]))
@@ -395,7 +422,15 @@ window.__ModuleLoader__.load({
           const saved = canvas.layout.view
           setView((current) => (current.x === 0 && current.y === 0 && current.zoom === 1 ? { x: saved.x, y: saved.y, zoom: saved.zoom } : current))
         }
+        // One automatic fit per project opening; afterwards the user owns the viewport.
+        const key = String(canvas?.project?.id ?? '')
+        if (key !== '' && fitted.current !== key) {
+          fitted.current = key
+          setTimeout(() => { try { fitRef.current?.() } catch { /* fit is cosmetic */ } }, 60)
+        }
       }, [canvas?.project?.id, nodes.length])
+
+      const fitRef = useRef(null)
 
       const persist = useCallback((nextPositions, nextView) => {
         const payload = {
@@ -445,6 +480,8 @@ window.__ModuleLoader__.load({
         persist(positions, next)
       }
 
+      fitRef.current = fit
+
       const onNodePointerDown = (event, node) => {
         event.stopPropagation()
         onSelectBot(node.botId)
@@ -481,6 +518,11 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Orthogonal route with rounded corners: right edge of the source, a
+       * horizontal run, a vertical run, then into the left edge of the target.
+       * Straight beziers crossed node bodies, which made the graph hard to read.
+       */
       const path = (from, to) => {
         const a = positions[from]
         const b = positions[to]
@@ -489,10 +531,20 @@ window.__ModuleLoader__.load({
         const ay = a.y + NODE_H / 2
         const bx = b.x
         const by = b.y + NODE_H / 2
-        const forward = bx >= ax
-        const c1 = forward ? ax + Math.max(50, (bx - ax) / 2) : ax - 60
-        const c2 = forward ? bx - Math.max(50, (bx - ax) / 2) : bx + 60
-        return 'M ' + ax + ' ' + ay + ' C ' + c1 + ' ' + ay + ', ' + c2 + ' ' + by + ', ' + bx + ' ' + by
+        const stroke = Math.min(80, Math.max(40, Math.abs(bx - ax) / 3))
+        const midX = bx > ax ? ax + stroke : ax - stroke
+        const radius = 8
+        if (Math.abs(by - ay) < 2) return 'M ' + ax + ' ' + ay + ' L ' + bx + ' ' + by
+        const dir = by > ay ? 1 : -1
+        const approach = bx > midX ? midX : bx
+        return [
+          'M ' + ax + ' ' + ay,
+          'L ' + (midX - radius * Math.sign(midX - ax)) + ' ' + ay,
+          'Q ' + midX + ' ' + ay + ', ' + midX + ' ' + (ay + radius * dir),
+          'L ' + midX + ' ' + (by - radius * dir),
+          'Q ' + midX + ' ' + by + ', ' + (midX + radius * Math.sign(approach - midX)) + ' ' + by,
+          'L ' + bx + ' ' + by,
+        ].join(' ')
       }
 
       const stroke = { collaboration: 'rgba(71,84,103,.45)', communication: T.accent, handoff: '#b54708' }
@@ -538,15 +590,17 @@ window.__ModuleLoader__.load({
             overflow: 'hidden',
             borderRadius: 12,
             border: '1px solid ' + T.border,
-            background: 'radial-gradient(circle at 1px 1px, rgba(16,24,40,.10) 1px, transparent 0) 0 0/22px 22px, var(--dsw-bg-panel, transparent)',
+            background: 'radial-gradient(circle at 1px 1px, rgba(128,128,128,.22) 1px, transparent 0) 0 0/22px 22px, var(--dsw-bg-panel, transparent)',
             cursor: drag !== null ? 'grabbing' : pan !== null ? 'grabbing' : 'grab',
             touchAction: 'none',
             userSelect: 'none',
           },
         },
-          nodes.length === 0
-            ? h('div', { style: { ...S.empty, position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' } }, '还没有 Bot。先在「团队」里生成团队，画布会显示真实节点。')
-            : null,
+          canvas === null
+            ? h('div', { style: { ...S.empty, position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' } }, '正在读取团队与消息…')
+            : nodes.length === 0
+              ? h('div', { style: { ...S.empty, position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' } }, '还没有 Bot。先在「团队」里生成团队，画布会显示真实节点。')
+              : null,
           h('div', { style: { position: 'absolute', left: 0, top: 0, transform: 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.zoom + ')', transformOrigin: '0 0', width: 1, height: 1 } },
             h('svg', { style: { position: 'absolute', left: 0, top: 0, width: 6000, height: 4000, overflow: 'visible', pointerEvents: 'none' } },
               h('defs', null,
@@ -580,8 +634,15 @@ window.__ModuleLoader__.load({
             edges.filter((edge) => edge.kind !== 'collaboration' && positions[edge.from] !== undefined && positions[edge.to] !== undefined).map((edge) => {
               const a = positions[edge.from]
               const b = positions[edge.to]
-              const left = (a.x + NODE_W + b.x) / 2
-              const top = (a.y + b.y + NODE_H) / 2 - 10
+              // Sit the chip on the vertical run of the orthogonal route, which is
+              // always between the two columns and therefore clear of node bodies.
+              const ax = a.x + NODE_W
+              const ay = a.y + NODE_H / 2
+              const bx = b.x
+              const by = b.y + NODE_H / 2
+              const run = Math.min(80, Math.max(40, Math.abs(bx - ax) / 3))
+              const left = bx > ax ? ax + run : ax - run
+              const top = (ay + by) / 2
               return h('button', {
                 key: 'label:' + edge.id,
                 type: 'button',
@@ -595,7 +656,7 @@ window.__ModuleLoader__.load({
                   padding: '1px 6px',
                   borderRadius: 999,
                   border: '1px solid ' + (edge.id === selectedEdgeId ? '#b42318' : T.border),
-                  background: 'var(--dsw-bg-panel, #fff)',
+                  background: 'var(--dsw-bg-panel, var(--dsw-bg-base, transparent))',
                   color: T.muted,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -619,7 +680,7 @@ window.__ModuleLoader__.load({
                   borderRadius: 12,
                   border: '1px solid ' + (isSelected ? T.accent : T.border),
                   boxShadow: isSelected ? '0 0 0 3px rgba(37,99,235,.16)' : '0 1px 2px rgba(16,24,40,.06)',
-                  background: 'var(--dsw-bg-panel, #fff)',
+                  background: 'var(--dsw-bg-panel, var(--dsw-bg-base, transparent))',
                   display: 'grid',
                   gap: 3,
                   cursor: 'grab',
@@ -879,6 +940,8 @@ window.__ModuleLoader__.load({
         })
       }, [guard])
 
+      const viewportWidth = useViewportWidth()
+      const narrow = viewportWidth < 1180
       const selected = projects.find((project) => project.id === projectId)
       const budgets = budgetsState.budgets
       const selectedBot = selectedEdge === null ? teams.find((bot) => bot.id === selectedBotId) : undefined
@@ -1054,8 +1117,19 @@ window.__ModuleLoader__.load({
           }, label))),
         error === '' ? null : h('div', { style: { ...S.muted, color: '#b42318', border: '1px solid rgba(180,35,24,.35)', borderRadius: 8, padding: '5px 9px' } }, error),
         notice === '' ? null : h('div', { style: { ...S.muted, color: '#05603a', border: '1px solid rgba(5,96,58,.35)', borderRadius: 8, padding: '5px 9px' } }, notice),
-        h('div', { style: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '220px minmax(320px, 1fr) 320px', gap: 10 } },
-          h('div', { style: { minHeight: 0, borderRight: '1px solid ' + T.border, paddingRight: 8 } },
+        h('div', {
+          style: {
+            flex: 1,
+            minHeight: 0,
+            display: 'grid',
+            gap: TOKENS.space.lg,
+            // Three columns need room for a readable canvas; below that the rail
+            // and the inspector stack instead of squashing the graph.
+            gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : '220px minmax(320px, 1fr) 340px',
+            gridTemplateRows: narrow ? 'auto minmax(320px, 1fr) auto' : 'minmax(0, 1fr)',
+          },
+        },
+          h('div', { style: { minHeight: 0, borderRight: narrow ? 'none' : '1px solid ' + T.border, borderBottom: narrow ? '1px solid ' + T.border : 'none', paddingRight: narrow ? 0 : 8, paddingBottom: narrow ? 8 : 0, maxHeight: narrow ? 132 : undefined, overflow: 'auto' } },
             h(LeftRail, {
               projects, selected: projectId, onSelectProject: (id) => { setProjectId(id); setSelectedBotId(''); setSelectedEdge(null) },
               teams, selectedBotId, onSelectBot: (botId) => { setSelectedEdge(null); setSelectedBotId(botId); setView('canvas') },

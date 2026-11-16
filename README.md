@@ -32,6 +32,21 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 或在 Harness 内：**插件 → 添加插件 → 本地目录**，选中本目录。
 详细步骤与自检见 [`docs/installation.md`](docs/installation.md)，运维/备份/回滚见 [`docs/runbook.md`](docs/runbook.md)。
 
+## 可视化工作台（v1.1）
+
+一个项目 = 一个工作台：左侧项目与团队、顶部项目状态与待审批、中间 **Agent Flow 画布**、右侧选中 Bot 的
+Session 详情、底部跨 Session 事件时间线。五个主视图：Overview / Canvas / Sessions / Tasks / Deliveries。
+
+- 画布节点绑定**真实的独立 Session**（节点上就是 Session id），显示存活、当前任务、阻塞；拖动/缩放/平移/适配，
+  坐标与视口存放在 `canvas_nodes` / `canvas_views`（迁移 v4），重启后保留。
+- 连线只来自真实数据：协作关系（能力推导）、实际通信（消息按 Bot 对聚合，含次数与最近时间）、任务交接
+  （交接类消息 + assign 事件）；可按类型开关与 1h/24h/7d 时间窗筛选，点击查看该方向的消息历史与关联任务。
+- 右侧 Inspector：任务、Git 分支/worktree、阻塞、收发消息、工件与检查；操作全部接真实 API
+  （复制 Session id、发消息 = `team.wake`、打开任务、打开交付）。
+- React Flow 在插件 Client 模块里不可用（模块表只暴露 react 等），因此画布是零依赖实现；原因见
+  `docs/workspace-audit.md`。
+
+![工作台](docs/screenshots/10-workspace.png)
 ## 界面
 
 工作台是 DSH 主区域里的一个完整面板（左侧栏「项目团队」入口），全部数据来自宿主 API：

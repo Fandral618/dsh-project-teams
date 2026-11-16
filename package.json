@@ -1,6 +1,6 @@
 {
   "name": "dsh-project-teams",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "description": "Project Teams: projects whose members are long-lived independent DSH Sessions (PM / Developer / Reviewer / QA), coordinated by a deterministic Host task engine with isolated Git worktrees, independent review and human approval gates.",

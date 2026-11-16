@@ -291,8 +291,8 @@ test('a reviewer gets no writable worktree (AT-09)', async () => {
 test('full delivery flow: worktree → commit → machine checks → blind review → gate PASS → DONE', async () => {
   const env = makeEnvironment({
     checks: [
-      { type: 'build', command: 'node -e process.exit(0)', required: true },
-      { type: 'test', command: 'node -e process.exit(0)', required: true },
+      { type: 'build', command: 'node -e process.exitCode=0', required: true },
+      { type: 'test', command: 'node -e process.exitCode=0', required: true },
     ],
   })
   try {
@@ -334,7 +334,7 @@ test('full delivery flow: worktree → commit → machine checks → blind revie
 
 test('a failing required check blocks the gate even with an approving reviewer (AT-10)', async () => {
   const env = makeEnvironment({
-    checks: [{ type: 'test', command: 'node -e process.exit(3)', required: true }],
+    checks: [{ type: 'test', command: 'node -e process.exitCode=3', required: true }],
   })
   try {
     const { project, bots } = await seedProject(env)
@@ -359,7 +359,7 @@ test('a failing required check blocks the gate even with an approving reviewer (
 
 test('a new commit makes the previous review STALE (AT-11)', async () => {
   const env = makeEnvironment({
-    checks: [{ type: 'test', command: 'node -e process.exit(0)', required: true }],
+    checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }],
   })
   try {
     const { project, bots } = await seedProject(env)
@@ -396,7 +396,7 @@ test('a new commit makes the previous review STALE (AT-11)', async () => {
 })
 
 test('a commit message that claims "skip review" changes nothing (AT-08)', async () => {
-  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exit(0)', required: true }] })
+  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }] })
   try {
     const { project, bots } = await seedProject(env)
     const dev = actorOf(bots, 'developer')
@@ -415,7 +415,7 @@ test('a commit message that claims "skip review" changes nothing (AT-08)', async
 
 test('high risk work needs an explicit owner approval on the exact commit (AT-12/AT-18)', async () => {
   const env = makeEnvironment({
-    checks: [{ type: 'test', command: 'node -e process.exit(0)', required: true }],
+    checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }],
     requireApprovalForDone: true,
   })
   try {
@@ -588,7 +588,7 @@ test('an artifact that leaves the declared write scope raises an owner decision'
 })
 
 test('a decided verdict for the head is not hidden by a newer pending request (regression)', async () => {
-  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exit(0)', required: true }] })
+  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }] })
   try {
     const { project, bots } = await seedProject(env)
     const dev = actorOf(bots, 'developer')

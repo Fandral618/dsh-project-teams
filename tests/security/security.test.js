@@ -5,6 +5,8 @@
  */
 
 import test from 'node:test'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { ownerActor } from '../../lib/host/permissions.js'
 import { containPath, safeSegment } from '../../lib/host/worktree.js'
@@ -14,10 +16,13 @@ import { actorOf, makeEnvironment, makeRepository, seedProject } from '../helper
 const owner = ownerActor()
 
 test('a managed path cannot escape its root, whatever the task id claims', () => {
-  const root = 'C:/data/projects/prj_1/runs'
-  assert.throws(() => containPath(root, 'C:/data/projects/prj_1/runs/../../evil'), /outside the managed root/)
-  assert.throws(() => containPath(root, 'C:/Windows/System32'), /outside the managed root/)
-  assert.equal(containPath(root, 'C:/data/projects/prj_1/runs/run_1/worktree'), 'C:\\data\\projects\\prj_1\\runs\\run_1\\worktree')
+  // Absolute root of the CURRENT platform, so the suite behaves the same on
+  // Windows and on a POSIX CI runner.
+  const root = resolve(tmpdir(), 'pt-managed', 'prj_1', 'runs')
+  assert.throws(() => containPath(root, join(root, '..', '..', 'evil')), /outside the managed root/)
+  assert.throws(() => containPath(root, resolve(tmpdir())), /outside the managed root/)
+  assert.throws(() => containPath(root, root), /outside the managed root/)
+  assert.equal(containPath(root, join(root, 'run_1', 'worktree')), join(root, 'run_1', 'worktree'))
 })
 
 test('path segments accept only safe characters', () => {

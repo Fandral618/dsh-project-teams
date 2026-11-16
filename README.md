@@ -99,7 +99,7 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 ## 测试
 
 ```sh
-npm test            # 54 个测试：单元 + 集成 + 安全
+npm test            # 57 个测试：单元 + 集成 + 安全
 npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration
@@ -138,5 +138,6 @@ npm run test:security
 | 频道 / 群组消息 | ✗ | 未做（当前是点对点 + 角色寻址） |
 | 质量仪表板 / 成本监控 | ✅ | 新「质量」标签页：完成率、返工率、平均周期、检查通过率、findings 分布、令牌用量与预算、消息/死信、决策计数 |
 | Timeline | ◐ | 活动记录 + 任务事件已可查；独立时间线视图未做 |
-| PR 集成 / 回滚 | ✗ | 未做；合并仍由 Owner 在本地执行（提案已有） |
+| **合并执行器** | ✅ | Owner 批准后由 `decisions.executeMerge` 执行：重验门禁/分支/base、`--no-ff`、冲突回滚、幂等、写审计 |
+| PR 集成 / 回滚 | ✗ | 远程 PR 与回滚脚本未做 |
 | 双审 / 交叉模型 | ✗ | 未做 |

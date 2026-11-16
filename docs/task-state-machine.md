@@ -91,3 +91,15 @@ DRAFT ──submit──▶ READY ──assign/claim──▶ ASSIGNED ──sta
 任务的 `write_scope`（逗号分隔路径前缀）在提交工件时被检查：落在范围外的文件写入
 `artifacts.summary.outOfScope`，并生成一条 `attention` 决策，提示 Owner 注意范围扩张。
 P0 只提示不阻断；是否阻断由策略决定（P1）。
+
+## 合并执行（P1，规格 §6.3）
+
+Bot 只能 `propose` 一个 `merge` 提案；Owner 在决策收件箱批准后，还有一个**独立的执行步骤**
+（`decisions.executeMerge` / `pt_owner execute_merge`），执行时逐项重验、绝不复用旧报告：
+
+1. 变更单必须是 `APPROVED`（`PENDING` 拒绝执行；执行器自己不做任何批准）；
+2. 任务门禁对当前 head 仍为 `PASS`；
+3. 仓库必须位于目标分支（默认 `projects.default_branch`）、工作区干净；
+4. 目标分支必须仍停在评审时的 base commit —— 否则报 `merge/base-moved`，要求重新检查并重新审批；
+5. 用 `git merge --no-ff` 生成可见的集成点；冲突则 `git merge --abort` 并报 `merge/conflict`，仓库保持不变；
+6. 成功后变更单转 `EXECUTED`，写审计与任务事件 `merge`；重复调用返回「已合并」，不会二次合并。

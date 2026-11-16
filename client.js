@@ -180,6 +180,7 @@ window.__ModuleLoader__.load({
       ACTIVE: '进行中',
       PAUSED: '已暂停',
       ARCHIVED: '已归档',
+      EXECUTED: '已执行',
     }
 
     const STATUS_COLOR = {
@@ -407,6 +408,7 @@ window.__ModuleLoader__.load({
         decisions, busy,
         onDecideChange: (changeId, decision, justification) => act('change', () => call('decisions.decideChange', { changeId, decision, justification }), decision === 'APPROVE' ? '提案已批准' : '提案已拒绝'),
         onApproveTask: (taskId, decision, headCommit, justification) => act('approve', () => call('decisions.approveTask', { taskId, decision, headCommit, justification }), decision === 'APPROVE' ? '审批已记录（批准）' : '审批已记录（拒绝）'),
+        onExecuteMerge: (changeId) => act('merge', () => call('decisions.executeMerge', { changeId }), '合并已执行'),
       })
 
       const QualityTab = h(QualityPanel, { metrics })
@@ -962,10 +964,10 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function DecisionsPanel({ decisions, busy, onDecideChange, onApproveTask }) {
+    function DecisionsPanel({ decisions, busy, onDecideChange, onApproveTask, onExecuteMerge }) {
       const [justification, setJustification] = useState('')
       if (decisions === null) return h('div', { style: S.empty }, '正在加载决策…')
-      const pending = decisions.changes.filter((row) => row.status === 'PENDING')
+      const visible = decisions.changes
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
         h('div', { style: S.card },
           h('strong', { style: { fontSize: 13 } }, '等待 Owner 决定'),
@@ -978,13 +980,18 @@ window.__ModuleLoader__.load({
               { key: 'risk', title: '风险', render: (row) => h(Badge, { value: row.risk_level === 'high' ? 'FAIL' : row.risk_level === 'medium' ? 'NEEDS_HUMAN' : 'INCOMPLETE', label: row.risk_level === 'high' ? '高' : row.risk_level === 'medium' ? '中' : '低' }) },
               { key: 'task', title: '任务', render: (row) => row.task_id ?? '—' },
               { key: 'by', title: '提出方', render: (row) => `${row.proposed_by === 'system' ? '引擎' : short(row.proposed_by, 14)}` },
+              { key: 'state', title: '状态', render: (row) => h(Badge, { value: row.status }) },
               { key: 'actions', title: '', render: (row) => h('div', { style: S.row },
-                h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onDecideChange(row.id, 'APPROVE', justification) }, '批准'),
-                h(Button, { kind: 'danger', disabled: busy !== '', onClick: () => onDecideChange(row.id, 'REJECT', justification) }, '拒绝'),
+                row.status === 'PENDING' ? h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onDecideChange(row.id, 'APPROVE', justification) }, '批准') : null,
+                row.status === 'PENDING' ? h(Button, { kind: 'danger', disabled: busy !== '', onClick: () => onDecideChange(row.id, 'REJECT', justification) }, '拒绝') : null,
+                // An approved merge still needs an explicit execution step; nothing merges on its own.
+                row.status === 'APPROVED' && row.kind === 'merge' ? h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onExecuteMerge(row.id) }, '执行合并') : null,
+                row.status === 'APPROVED' && row.kind !== 'merge' ? h('span', { style: S.muted }, '已批准，按提案处理') : null,
+                row.status === 'EXECUTED' ? h('span', { style: S.muted }, '已执行') : null,
               ) },
             ],
-            rows: pending,
-            empty: '没有待处理的提案。',
+            rows: visible,
+            empty: '没有提案或待办。',
           }),
         ),
         h('div', { style: S.card },

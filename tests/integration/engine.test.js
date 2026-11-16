@@ -13,6 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { ownerActor } from '../../lib/host/permissions.js'
 import { actorOf, makeEnvironment, makeRepository, seedProject } from '../helpers.js'
@@ -838,6 +839,119 @@ test('a new role template version does not rewrite an existing Bot (P1)', async 
     // And the rendered brief uses the Bot's own version.
     const brief = env.service.briefFor(env.service.project(project.id), env.service.bot(dev.id))
     assert.ok(brief.includes('Developer'))
+  } finally {
+    env.close()
+  }
+})
+
+// ------------------------------------------------------------ merge executor
+
+/**
+ * Take one task all the way to gate PASS and return its identity.
+ * @param {any} env - environment.
+ * @param {{riskLevel?: string}} [options] - task options.
+ * @returns {Promise<{project: any, bots: any, task: any, artifact: any, reviewer: any, dev: any}>} fixtures.
+ */
+async function completedTask(env, options = {}) {
+  const { project, bots } = await seedProject(env, { checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }] })
+  const dev = actorOf(bots, 'developer')
+  const reviewer = actorOf(bots, 'reviewer')
+  const task = await readyTask(env, project, dev, { riskLevel: options.riskLevel ?? 'low' })
+  const run = await env.service.startRun(dev.actor, task.id)
+  writeFileSync(join(run.worktree_path, 'merge.js'), 'export const merged = 1\n')
+  const artifact = await env.service.submitArtifact(dev.actor, task.id, { message: 'merge candidate' })
+  env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
+  const review = await env.service.requestReview(dev.actor, task.id)
+  await env.service.runVerification(dev.actor, task.id)
+  await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+  return { project, bots, task: env.service.task(task.id), artifact, reviewer, dev, review }
+}
+
+test('a merge proposal cannot execute before the owner approves it', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, dev, task } = await completedTask(env)
+    const change = env.service.proposeChange(dev.actor, {
+      projectId: project.id,
+      taskId: task.id,
+      kind: 'merge',
+      impact: 'merge the task branch into main',
+      payload: { taskId: task.id },
+    })
+    await assert.rejects(() => env.service.executeMerge(owner, change.id), /only an owner-approved merge/)
+    // And a bot cannot execute even an approved one.
+    env.service.decideChange(owner, change.id, 'APPROVE', 'reviewed')
+    await assert.rejects(() => env.service.executeMerge(dev.actor, change.id), /may not perform "merge.execute"/)
+    assert.equal(env.db.prepare('SELECT status FROM change_requests WHERE id = ?').get(change.id).status, 'APPROVED')
+  } finally {
+    env.close()
+  }
+})
+
+test('an approved merge is executed with --no-ff and recorded (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, task, artifact } = await completedTask(env)
+    const change = env.service.proposeChange(owner, {
+      projectId: project.id,
+      taskId: task.id,
+      kind: 'merge',
+      impact: 'merge task branch',
+      payload: { taskId: task.id },
+    })
+    env.service.decideChange(owner, change.id, 'APPROVE', 'diff and tests reviewed')
+    const result = await env.service.executeMerge(owner, change.id)
+    assert.equal(result.alreadyMerged, false)
+    assert.equal(String(result.into), String(project.default_branch))
+    assert.notEqual(result.mergeCommit, task.head_commit, 'a merge commit was created')
+    // The default branch now contains the change, and the merge commit has two parents.
+    const { execFileSync } = await import('node:child_process')
+    const parents = execFileSync('git', ['rev-list', '--parents', '-n', '1', result.mergeCommit], { cwd: env.repoRoot }).toString().trim().split(' ')
+    assert.equal(parents.length, 3)
+    const files = execFileSync('git', ['ls-tree', '--name-only', 'HEAD'], { cwd: env.repoRoot }).toString()
+    assert.ok(files.includes('merge.js'))
+    // The change request is EXECUTED and the execution is audited + in the task log.
+    assert.equal(env.db.prepare('SELECT status FROM change_requests WHERE id = ?').get(change.id).status, 'EXECUTED')
+    assert.ok(env.db.prepare("SELECT * FROM audit_events WHERE action = 'merge.execute' AND result = 'ok'").get() !== undefined)
+    assert.ok(env.db.prepare("SELECT * FROM task_events WHERE task_id = ? AND action = 'merge'").get(task.id) !== undefined)
+    // Idempotent: a second call reports already-merged instead of merging twice.
+    const again = await env.service.executeMerge(owner, change.id)
+    assert.equal(again.alreadyMerged, true)
+    void artifact
+  } finally {
+    env.close()
+  }
+})
+
+test('a merge is refused when the base branch moved, the worktree is dirty or a check fails (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, task, artifact } = await completedTask(env)
+    const change = env.service.proposeChange(owner, {
+      projectId: project.id,
+      taskId: task.id,
+      kind: 'merge',
+      impact: 'merge',
+      payload: { taskId: task.id },
+    })
+    env.service.decideChange(owner, change.id, 'APPROVE', 'ok')
+
+    // 1) dirty worktree
+    writeFileSync(join(env.repoRoot, 'uncommitted.txt'), 'x\n')
+    await assert.rejects(() => env.service.executeMerge(owner, change.id), /uncommitted changes/)
+    execFileSync('git', ['checkout', '--', '.'], { cwd: env.repoRoot })
+    execFileSync('git', ['clean', '-fd'], { cwd: env.repoRoot })
+
+    // 2) base moved: another commit lands on main after the review
+    writeFileSync(join(env.repoRoot, 'later.txt'), 'later\n')
+    execFileSync('git', ['add', '-A'], { cwd: env.repoRoot })
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'later commit'], { cwd: env.repoRoot })
+    await assert.rejects(() => env.service.executeMerge(owner, change.id), /moved from .* since the review/)
+
+    // 3) the worktree must be on the target branch
+    execFileSync('git', ['checkout', '-q', '-b', 'other', 'HEAD'], { cwd: env.repoRoot })
+    await assert.rejects(() => env.service.executeMerge(owner, change.id), /is on "other"/)
+    void artifact
   } finally {
     env.close()
   }

@@ -72,6 +72,7 @@
 | `delivery.diff` | GET | `artifactId` | 已保存的 unified diff |
 | `decisions.list` | GET | `projectId` | 待处理变更申请 + 被门禁卡住的任务 |
 | `decisions.decideChange` | POST | `changeId`、`decision`、`justification` | 变更申请 |
+| `decisions.executeMerge` | POST | `changeId` | 执行一个**已批准**的合并提案（重验证 base/head/门禁） |
 | `decisions.approveTask` | POST | `taskId`、`decision`、`justification?`、`headCommit?` | 绑定到该 commit 的审批 |
 | `budgets.get` | GET | `projectId` | 预算行 |
 | `budgets.update` | POST | `projectId` + 预算字段 | 预算行 |
@@ -110,7 +111,7 @@
 
 ### Owner 工具 `pt_owner`
 
-只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`task_transition`、`task_edit`、`wake`、`interrupt`、`view`、`gate`、`budgets`、`verify_artifacts`、`export`。
+只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`task_transition`、`task_edit`、`execute_merge`、`wake`、`interrupt`、`view`、`gate`、`budgets`、`verify_artifacts`、`export`。
 `wake` 仅把一句话投递进目标 Bot 会话；**批准、暂停、归档、改策略不在此列**。
 
 ## 消息协议

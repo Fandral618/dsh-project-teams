@@ -25,7 +25,7 @@ Agent 预设没有暴露这两个工具）。因此每条 API 都以「安装版
 | 编号 | 检查点 | 结论 | 证据 |
 | --- | --- | --- | --- |
 | C01 | 创建真正独立的 Session | PASS | `state/m0.json`：两个会话，`parentSessionId: null`、`origin: null` |
-| C02 | 重启/重新激活后仍能识别与恢复 | PASS（有限制） | 后续激活写出的 `state/m0-verify-*.json`；`~/.dsh/sessions/<cwd>/<session>/session.v4.jsonl.zstd` |
+| C02 | 重启/重新激活后仍能识别与恢复 | PASS | 后续激活写出的 `state/m0-verify-*.json`；`~/.dsh/sessions/<cwd>/<session>/session.v4.jsonl.zstd` |
 | C03 | 向指定 Session 投递消息 | PASS | `state/m0.json` 中 `delivery.accepted: true`，且标记文本出现在 B 自己的派生日志里 |
 | C04 | 按会话绑定角色配置 | PASS | `state/m0.json`：A 为 `standard`、B 为 `ptc` |
 | C05 | Cordis 注入、生命周期、工具注册 | PASS | 宿主日志 `project-teams: host ready (… store=ready)`；`pt_*` 工具已注册并被真实 Bot 调用 |
@@ -57,7 +57,9 @@ Agent 预设没有暴露这两个工具）。因此每条 API 都以「安装版
 - 实验：插件再次激活时，`list()` 与实时 store 重新读到了两个会话，且 M0 标记仍留在 B 的派生日志中
   → `state/m0-verify-1794811206266.json` `verdict: PASS`。
 - 持久底座：`~/.dsh/sessions/--C-Users-Administrator-.dsh-project-teams-m0--/<sessionId>/session.v4.jsonl.zstd`。
-- 限制：**进程级重启**无法在宿主内部自测（会杀掉正在验证的会话），已在运行手册中作为人工步骤列出。
+- 进程级重启：由 `npm run verify:restart` 在隔离 `DSH_HOME` + 隔离 profile 中真实执行两次启动
+  （不同 pid），第二次从**冷会话持久日志**重新识别两个会话并读回投递标记 → `verdict: PASS`。
+  冷读走 `sessionController.events({ address: { kind:'session', sessionId } })`，官方定义即为「不激活 Agent 的持久历史读」。
 
 ## C03 — 向指定会话投递消息
 
@@ -151,6 +153,9 @@ M0 之后，同一个插件用**真实 Bot 会话**跑通了一次协作（详�
 2. Client 渲染没有截图验证（C06）。
 3. 外部 HTTP 请求被桌面「浏览器访问」开关拦住（C07）；插件内工作台是面向用户的验证面。
 4. 若 profile 没有 preset 注册表，`agentPreset` 记为 `null`，会话仍可创建（降级而非阻断）。
+5. **模块解析**：`@deepseek-ai/dsh-tools` 只在 Desktop Host 的模块图内可解析；`dsh` CLI 启动 linked 插件目录时
+   会 `ERR_MODULE_NOT_FOUND`。插件因此改为「优先宿主实现、失败回退本地编译器」（`lib/host/dsh-tools.js`），
+   Desktop 行为不变，CLI/隔离 profile 亦可运行。
 
 ## 真实运行修正的两个设计缺陷
 

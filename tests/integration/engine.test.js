@@ -56,8 +56,9 @@ test('a project team binds four DISTINCT independent Sessions with their own pre
     }
     // Every bot received its own role brief inside its own Session.
     for (const bot of bots) {
-      const texts = env.adapter.recentUserTexts(bot.session_id, 10)
-      assert.ok(texts.some((text) => text.includes(bot.role.toUpperCase())), `${bot.role} brief missing`)
+      const texts = await env.adapter.recentUserTexts(bot.session_id, 10)
+      assert.ok(texts.some((text) => text.toLowerCase().includes(bot.role.toLowerCase())), `${bot.role} brief missing`)
+      assert.ok(texts.some((text) => text.includes(project.name)), `${bot.role} brief must name the project`)
       assert.equal(texts.length, 1, 'the role brief is the only injected message')
     }
     assert.equal(project.status, 'active')
@@ -160,9 +161,9 @@ test('a repeated idempotency key produces one message and one delivery (AT-06)',
     assert.equal(stored.deliveries.length, 1)
     assert.ok(stored.deliveries[0].detail.includes('requestId'))
     // The message reached the PM Session, not the sender's.
-    const pmTexts = env.adapter.recentUserTexts(pm.bot.session_id, 10)
+    const pmTexts = await env.adapter.recentUserTexts(pm.bot.session_id, 10)
     assert.ok(pmTexts.some((text) => text.includes('Which field name?')))
-    const devTexts = env.adapter.recentUserTexts(dev.bot.session_id, 10)
+    const devTexts = await env.adapter.recentUserTexts(dev.bot.session_id, 10)
     assert.ok(!devTexts.some((text) => text.includes('Which field name?')))
   } finally {
     env.close()
@@ -312,7 +313,7 @@ test('full delivery flow: worktree → commit → machine checks → blind revie
     assert.equal(review.head_commit, artifact.repo_commit)
     // The review request is delivered to the reviewer's own Session.
     await env.dispatcher.tick()
-    const reviewerTexts = env.adapter.recentUserTexts(reviewer.bot.session_id, 5)
+    const reviewerTexts = await env.adapter.recentUserTexts(reviewer.bot.session_id, 5)
     assert.ok(reviewerTexts.some((text) => text.includes('Blind review request')))
     assert.ok(!reviewerTexts.some((text) => text.includes('I think it is fine')), 'the developer self-assessment must not be forwarded')
 
@@ -320,7 +321,7 @@ test('full delivery flow: worktree → commit → machine checks → blind revie
     assert.deepEqual(checks.map((row) => row.status), ['PASS', 'PASS'])
     assert.ok(checks[0].log_sha256.length === 64)
 
-    env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
     const done = env.service.taskDetail(task.id)
     assert.equal(done.status, 'DONE', `gate=${JSON.stringify(done.gate)}`)
     assert.equal(done.gate.status, 'PASS')
@@ -347,7 +348,7 @@ test('a failing required check blocks the gate even with an approving reviewer (
     env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
     await env.service.requestReview(dev.actor, task.id)
     await env.service.runVerification(dev.actor, task.id)
-    env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
     const after = env.service.taskDetail(task.id)
     assert.notEqual(after.status, 'DONE')
     assert.ok(['FAIL', 'STALE', 'INCOMPLETE'].includes(after.gate.status), after.gate.status)
@@ -372,7 +373,7 @@ test('a new commit makes the previous review STALE (AT-11)', async () => {
     env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
     await env.service.requestReview(dev.actor, task.id)
     // The reviewer asks for changes, which returns the task to REWORK.
-    env.service.submitReview(reviewer.actor, {
+    await env.service.submitReview(reviewer.actor, {
       taskId: task.id,
       verdict: 'CHANGES_REQUESTED',
       findings: [{ severity: 'major', summary: 'missing validation', file: 'one.js' }],
@@ -429,7 +430,7 @@ test('high risk work needs an explicit owner approval on the exact commit (AT-12
     env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
     await env.service.requestReview(dev.actor, task.id)
     await env.service.runVerification(dev.actor, task.id)
-    env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
     const needsHuman = env.service.taskDetail(task.id)
     assert.equal(needsHuman.gate.status, 'NEEDS_HUMAN', JSON.stringify(needsHuman.gate))
     assert.notEqual(needsHuman.status, 'DONE')
@@ -612,9 +613,146 @@ test('a decided verdict for the head is not hidden by a newer pending request (r
        VALUES ('rev_legacy', ?, ?, ?, ?, ?, 'PENDING', '[]', '{}', ?, NULL)`,
     ).run(task.id, reviewer.bot.id, artifact.id, run.base_commit, artifact.repo_commit, Date.now() + 1_000)
     await env.service.runVerification(dev.actor, task.id)
-    env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
     const done = env.service.taskDetail(task.id)
     assert.equal(done.status, 'DONE', `gate=${JSON.stringify(done.gate)}`)
+  } finally {
+    env.close()
+  }
+})
+
+// ---------------------------------------------------------------- gap closure
+
+test('a task can be edited while it is still editable, and the edit is audited', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const pm = actorOf(bots, 'pm')
+    const task = env.service.createTask(owner, project.id, {
+      title: 'original title',
+      acceptance: ['first criterion'],
+      description: 'original description',
+    })
+    const edited = env.service.updateTask(pm.actor, task.id, {
+      title: 'revised title',
+      description: 'revised description',
+      acceptance: ['first criterion', 'second criterion'],
+      riskLevel: 'medium',
+      expectedVersion: task.version,
+    })
+    assert.equal(edited.title, 'revised title')
+    assert.deepEqual(edited.acceptance, ['first criterion', 'second criterion'])
+    assert.equal(edited.risk_level, 'medium')
+    assert.equal(Number(edited.version), Number(task.version) + 1)
+    assert.ok(edited.events.some((event) => event.action === 'edit'))
+    const auditRow = env.db.prepare("SELECT * FROM audit_events WHERE action = 'task.edit'").get()
+    assert.ok(auditRow !== undefined)
+
+    // A stale version is refused, and a running task is not editable at all.
+    assert.throws(
+      () => env.service.updateTask(pm.actor, task.id, { title: 'x', expectedVersion: task.version }),
+      (error) => error.code === 'VERSION_CONFLICT',
+    )
+    // A developer may not edit a task it does not coordinate.
+    assert.throws(() => env.service.updateTask(dev.actor, task.id, { title: 'nope' }), /may not perform "task.edit"/)
+
+    env.service.transition(owner, task.id, 'submit', { expectedVersion: edited.version })
+    env.service.claimTask(dev.actor, task.id, edited.version + 1)
+    await env.service.startRun(dev.actor, task.id)
+    assert.throws(() => env.service.updateTask(pm.actor, task.id, { acceptance: ['changed after start'] }), /cannot be edited/)
+  } finally {
+    env.close()
+  }
+})
+
+test('a project can hold more than four Bots, with labelled duplicates (spec §2.4)', async () => {
+  const env = makeEnvironment()
+  try {
+    const project = await env.service.createProject(owner, {
+      name: 'multi-dev',
+      goal: 'two developers in parallel',
+      repoRoot: env.repoRoot,
+    })
+    const bots = await env.service.createTeam(owner, project.id, {
+      roles: ['pm', 'developer', 'developer', 'reviewer', 'qa'],
+    })
+    assert.equal(bots.length, 5)
+    const labels = bots.map((bot) => bot.label)
+    assert.deepEqual(labels.sort(), ['developer', 'developer#2', 'pm', 'qa', 'reviewer'])
+    const sessions = new Set(bots.map((bot) => bot.session_id))
+    assert.equal(sessions.size, 5, 'every bot owns its own Session')
+    // Two developers can hold different runs at the same time.
+    const first = bots.find((bot) => bot.label === 'developer')
+    const second = bots.find((bot) => bot.label === 'developer#2')
+    const actorA = { kind: 'bot', id: first.id, role: 'developer', projectId: project.id, sessionId: first.session_id }
+    const actorB = { kind: 'bot', id: second.id, role: 'developer', projectId: project.id, sessionId: second.session_id }
+    const taskA = env.service.createTask(owner, project.id, { title: 'A', acceptance: ['a'] })
+    env.service.transition(owner, taskA.id, 'submit', { expectedVersion: taskA.version })
+    env.service.claimTask(actorA, taskA.id, taskA.version + 1)
+    const runA = await env.service.startRun(actorA, taskA.id)
+    const taskB = env.service.createTask(owner, project.id, { title: 'B', acceptance: ['b'] })
+    env.service.transition(owner, taskB.id, 'submit', { expectedVersion: taskB.version })
+    env.service.claimTask(actorB, taskB.id, taskB.version + 1)
+    const runB = await env.service.startRun(actorB, taskB.id)
+    assert.notEqual(runA.worktree_path, runB.worktree_path)
+    // Reviewers are picked per project, not per role uniqueness.
+    assert.equal(env.db.prepare("SELECT COUNT(*) AS n FROM project_bots WHERE project_id = ? AND role = 'developer'").get(project.id).n, 2)
+  } finally {
+    env.close()
+  }
+})
+
+test('token budgets are measured and enforced, and the run records its usage', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    // A fake token meter: 100 tokens per measurement call, so a run starting at
+    // baseline 100 and reaching 400 has used 300.
+    let reading = 100
+    env.service.tokenMeter = { measure: () => ({ totalTokens: reading }) }
+    env.service.getSession = () => ({ fake: true })
+    const task = await readyTask(env, project, dev)
+    const run = await env.service.startRun(dev.actor, task.id)
+    assert.equal(Number(run.tokens_base), 100)
+    reading = 400
+    const updated = env.service.recordRunUsage(run.id)
+    assert.equal(Number(updated.tokens_used), 300)
+    assert.equal(updated.usage_source, 'tokenMeter')
+
+    // The per-run limit now blocks further work on this run.
+    env.service.updateBudgets(owner, project.id, { perRunTokenLimit: 200 })
+    assert.throws(() => env.service.assertTokenBudget(project.id, updated), /token budget/)
+    const attention = env.db.prepare("SELECT * FROM change_requests WHERE kind = 'attention'").all()
+    assert.ok(attention.length >= 1)
+
+    // The daily limit blocks a new run in the project.
+    env.service.updateBudgets(owner, project.id, { perRunTokenLimit: 0, dailyTokenLimit: 1 })
+    assert.throws(() => env.service.assertTokenBudget(project.id), /token budget exhausted/)
+  } finally {
+    env.close()
+  }
+})
+
+test('artifact hashes are verified, and a tampered file is reported', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const task = await readyTask(env, project, dev)
+    const run = await env.service.startRun(dev.actor, task.id)
+    writeFileSync(join(run.worktree_path, 'ok.txt'), 'ok\n')
+    const artifact = await env.service.submitArtifact(dev.actor, task.id, { message: 'ok' })
+    const clean = await env.service.verifyArtifacts(owner, project.id)
+    assert.equal(clean.checked, 1)
+    assert.equal(clean.ok, 1)
+    assert.equal(clean.corrupted, 0)
+    // Tamper with the stored diff: the hash check must catch it.
+    writeFileSync(artifact.uri, 'tampered\n')
+    const dirty = await env.service.verifyArtifacts(owner, project.id)
+    assert.equal(dirty.corrupted, 1)
+    assert.equal(dirty.rows[0].status, 'corrupted')
   } finally {
     env.close()
   }

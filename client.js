@@ -267,6 +267,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState('')
       const [expandedTask, setExpandedTask] = useState('')
       const [taskDetail, setTaskDetail] = useState(null)
+      const [budgetsState, setBudgets] = useState({ projectId: '', budgets: null })
       const mounted = useRef(true)
 
       useEffect(() => () => { mounted.current = false }, [])
@@ -295,7 +296,7 @@ window.__ModuleLoader__.load({
       const refreshProject = useCallback(async () => {
         if (projectId === '') return
         await guard('project', async () => {
-          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity] = await Promise.all([
+          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets] = await Promise.all([
             call('overview.get', { projectId }),
             call('team.list', { projectId }),
             call('tasks.list', { projectId }),
@@ -303,6 +304,7 @@ window.__ModuleLoader__.load({
             call('delivery.list', { projectId }),
             call('decisions.list', { projectId }),
             call('activity.list', { projectId, limit: 60 }),
+            call('budgets.get', { projectId }).catch(() => null),
           ])
           if (!mounted.current) return
           setOverview(nextOverview)
@@ -312,6 +314,7 @@ window.__ModuleLoader__.load({
           setDelivery(nextDelivery)
           setDecisions(nextDecisions)
           setActivity(nextActivity)
+          setBudgets({ projectId, budgets: nextBudgets })
         })
       }, [guard, projectId])
 
@@ -335,6 +338,9 @@ window.__ModuleLoader__.load({
       }, [guard])
 
       const selected = projects.find((project) => project.id === projectId)
+
+      // Budgets of the selected project, refreshed with the rest of the view.
+      const budgets = budgetsState.budgets
 
       const openTask = useCallback(async (taskId) => {
         setExpandedTask(taskId)
@@ -368,7 +374,7 @@ window.__ModuleLoader__.load({
 
       const TeamTab = h(TeamPanel, {
         project: selected, teams, busy,
-        onGenerate: () => act('team', () => call('team.create', { projectId, presets: {} }), '团队已创建：四个独立 Session'),
+        onGenerate: (roles) => act('team', () => call('team.create', { projectId, roles, presets: {} }), `团队已创建：${roles.length} 个独立 Session`),
         onRebind: (botId, sessionId) => act('rebind', () => call('team.rebind', { projectId, botId, sessionId }), 'Session 已重新绑定'),
       })
 
@@ -379,6 +385,7 @@ window.__ModuleLoader__.load({
         onTransition: (taskId, action, reason) => act('transition', () => call('tasks.transition', { taskId, action, reason }), `任务已${ACTION_ZH[action] ?? action}`),
         onAssign: (taskId, botId, expectedVersion) => act('assign', () => call('tasks.assign', { taskId, botId, expectedVersion }), '任务已分配'),
         onVerify: (taskId) => act('verify', () => call('tasks.verify', { taskId }), '检查已执行'),
+        onUpdate: (taskId, patch) => act('task-edit', () => call('tasks.update', { taskId, ...patch }), '任务已更新'),
       })
 
       const MessagesTab = h(MessagesPanel, {
@@ -386,7 +393,11 @@ window.__ModuleLoader__.load({
         onReplay: (messageId) => act('replay', () => call('messages.replay', { messageId }), '消息已重新入队'),
       })
 
-      const DeliveryTab = h(DeliveryPanel, { delivery, tasks })
+      const DeliveryTab = h(DeliveryPanel, {
+        delivery,
+        tasks,
+        onVerifyArtifacts: () => guard('verify-artifacts', () => call('delivery.verify', { projectId })),
+      })
 
       const DecisionsTab = h(DecisionsPanel, {
         decisions, busy,
@@ -394,7 +405,17 @@ window.__ModuleLoader__.load({
         onApproveTask: (taskId, decision, headCommit, justification) => act('approve', () => call('decisions.approveTask', { taskId, decision, headCommit, justification }), decision === 'APPROVE' ? '审批已记录（批准）' : '审批已记录（拒绝）'),
       })
 
-      const SettingsTab = h(SettingsPanel, { status, project: selected, busy, act, onProbe: refreshProject })
+      const SettingsTab = h(SettingsPanel, {
+        status,
+        project: selected,
+        budgets,
+        busy,
+        act,
+        onProbe: refreshProject,
+        onSavePolicy: (policy) => act('policy', () => call('projects.update', { projectId, policy }), '策略已保存'),
+        onSaveBudgets: (patch) => act('budgets', () => call('budgets.update', { projectId, ...patch }), '预算已保存'),
+        onExport: () => call('export.project', { projectId }),
+      })
 
       const tabs = [
         ['overview', '总览'],
@@ -580,6 +601,7 @@ window.__ModuleLoader__.load({
       // Hooks stay above every early return so the hook order is stable.
       const [rebindFor, setRebindFor] = useState('')
       const [sessionInput, setSessionInput] = useState('')
+      const [roleList, setRoleList] = useState('pm, developer, reviewer, qa')
       if (project === undefined) return h('div', { style: S.empty }, '请先选择项目。')
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
         h('div', { style: S.card },
@@ -587,12 +609,18 @@ window.__ModuleLoader__.load({
             h('strong', { style: { fontSize: 13 } }, '团队成员'),
             h('span', { style: S.muted }, `${teams.length} 个 Bot`),
             h('span', { style: S.grow }),
-            teams.length === 0 ? h(Button, { kind: 'primary', onClick: onGenerate, disabled: busy !== '' }, '生成 4 个 Bot（PM · 开发 · 评审 · QA）') : null,
+            teams.length === 0 ? h(Field, { label: '角色清单（每项目 4–8 个；同名角色可重复，例如 developer, developer）' },
+              h('input', { style: { ...S.input, minWidth: 320 }, value: roleList, onChange: (event) => setRoleList(event.target.value) })) : null,
+            teams.length === 0 ? h(Button, {
+              kind: 'primary',
+              disabled: busy !== '',
+              onClick: () => onGenerate(roleList.split(',').map((role) => role.trim()).filter(Boolean)),
+            }, '生成团队') : null,
           ),
           h('p', { style: S.muted }, '每个 Bot 都是一个普通 DSH Session，拥有独立的 Agent 预设与角色说明；没有任何 Bot 是别的 Agent 的子代理。复制 Session id 可在 DSH 中打开对应会话。'),
           h(Table, {
             columns: [
-              { key: 'role', title: '角色', render: (row) => h('strong', { style: { textTransform: 'uppercase', fontSize: 11.5 } }, row.role) },
+              { key: 'role', title: '角色', render: (row) => h('strong', { style: { textTransform: 'uppercase', fontSize: 11.5 } }, row.label || row.role) },
               { key: 'session', title: '独立 Session', render: (row) => h('div', { style: S.row },
                 h('span', { style: S.code }, row.session_id),
                 h(Button, {
@@ -619,12 +647,13 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function TasksPanel({ project, teams, tasks, busy, expandedTask, taskDetail, onOpen, onCreate, onTransition, onAssign, onVerify }) {
+    function TasksPanel({ project, teams, tasks, busy, expandedTask, taskDetail, onOpen, onCreate, onTransition, onAssign, onVerify, onUpdate }) {
       const [title, setTitle] = useState('')
       const [description, setDescription] = useState('')
       const [acceptance, setAcceptance] = useState('')
       const [risk, setRisk] = useState('low')
       const [dependsOn, setDependsOn] = useState('')
+      const [editDraft, setEditDraft] = useState(null)
       if (project === undefined) return h('div', { style: S.empty }, '请先选择项目。')
       const detail = taskDetail !== null && taskDetail.id === expandedTask ? taskDetail : undefined
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
@@ -688,7 +717,32 @@ window.__ModuleLoader__.load({
           }),
         ),
         detail === undefined ? null : h('div', { style: S.card },
-          h('div', { style: S.row }, h('strong', { style: { fontSize: 13 } }, `${detail.id} ${detail.title}`), h(Badge, { value: detail.status }), h(Badge, { value: detail.gate.status })),
+          h('div', { style: S.row }, h('strong', { style: { fontSize: 13 } }, `${detail.id} ${detail.title}`), h(Badge, { value: detail.status }), h(Badge, { value: detail.gate.status }),
+            h('span', { style: S.grow }),
+            ['DRAFT', 'READY', 'REWORK', 'BLOCKED'].includes(detail.status)
+              ? h(Button, { onClick: () => setEditDraft(editDraft === null ? { title: detail.title, description: detail.description, acceptance: detail.acceptance.join('\n'), riskLevel: detail.risk_level } : null) }, editDraft === null ? '编辑任务' : '收起编辑')
+              : null),
+          editDraft === null ? null : h('div', { style: { ...S.card, borderStyle: 'dashed' } },
+            h('div', { style: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' } },
+              h(Field, { label: '标题' }, h('input', { style: S.input, value: editDraft.title, onChange: (event) => setEditDraft({ ...editDraft, title: event.target.value }) })),
+              h(Field, { label: '风险' }, h('select', { style: S.input, value: editDraft.riskLevel, onChange: (event) => setEditDraft({ ...editDraft, riskLevel: event.target.value }) },
+                h('option', { value: 'low' }, 'low'), h('option', { value: 'medium' }, 'medium'), h('option', { value: 'high' }, 'high — 需 Owner 批准')))),
+            h(Field, { label: '描述 / 修改范围' }, h('textarea', { style: S.area, value: editDraft.description, onChange: (event) => setEditDraft({ ...editDraft, description: event.target.value }) })),
+            h(Field, { label: '验收标准（每行一条）' }, h('textarea', { style: S.area, value: editDraft.acceptance, onChange: (event) => setEditDraft({ ...editDraft, acceptance: event.target.value }) })),
+            h('div', { style: S.row },
+              h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => {
+                void onUpdate(detail.id, {
+                  title: editDraft.title,
+                  description: editDraft.description,
+                  acceptance: editDraft.acceptance.split('\n').map((line) => line.trim()).filter(Boolean),
+                  riskLevel: editDraft.riskLevel,
+                  expectedVersion: detail.version,
+                })
+                setEditDraft(null)
+              } }, '保存修改'),
+              h(Button, { onClick: () => setEditDraft(null) }, '取消')),
+            h('p', { style: S.muted }, '只有草稿、就绪、返工或阻塞中的任务可以编辑：一旦开始执行，验收标准就是评审与门禁判定所依据的合约。')),
+          h('p', { style: S.muted }, detail.description === '' ? '无描述。' : detail.description),
           h('p', { style: S.muted }, detail.description === '' ? '无描述。' : detail.description),
           detail.acceptance.length === 0 ? null : h('div', null,
             h('span', { style: { ...S.muted, fontWeight: 600 } }, '验收标准'),
@@ -732,9 +786,28 @@ window.__ModuleLoader__.load({
     }
 
     function MessagesPanel({ messages, busy, onReplay }) {
+      const [search, setSearch] = useState('')
+      const filtered = search.trim() === ''
+        ? messages
+        : messages.filter((row) => `${row.body} ${row.type}`.toLowerCase().includes(search.trim().toLowerCase()))
+      const threads = new Map()
+      for (const row of filtered) {
+        const key = row.thread_id ?? row.task_id ?? 'direct'
+        if (!threads.has(key)) threads.set(key, [])
+        threads.get(key).push(row)
+      }
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
         h('div', { style: S.card },
-          h('strong', { style: { fontSize: 13 } }, 'Bot 间消息'),
+          h('div', { style: S.row },
+            h('strong', { style: { fontSize: 13 } }, 'Bot 间消息'),
+            h('span', { style: S.grow }),
+            h('input', {
+              style: { ...S.input, maxWidth: 260 },
+              value: search,
+              placeholder: '搜索正文或类型…',
+              onChange: (event) => setSearch(event.target.value),
+            })),
+          search === '' ? null : h('p', { style: S.muted }, `本地过滤 ${filtered.length} / ${messages.length} 条（带 thread 的消息按线程分组显示）`),
           h('p', { style: S.muted }, '已入队、已投递、已处理是三个不同状态：“已投递”只表示宿主接收了输入，“已处理”表示接收方 Bot 主动确认。'),
           h(Table, {
             columns: [
@@ -746,17 +819,23 @@ window.__ModuleLoader__.load({
               { key: 'body', title: '正文', render: (row) => h('span', { style: { ...S.muted, fontSize: 12 } }, row.body.length > 160 ? `${row.body.slice(0, 160)}…` : row.body) },
               { key: 'actions', title: '', render: (row) => (row.state === 'DEAD_LETTER' ? h(Button, { onClick: () => onReplay(row.id), disabled: busy !== '' }, '重投') : null) },
             ],
-            rows: messages,
+            rows: filtered,
             empty: '暂无消息。',
           }),
+          h('p', { style: S.muted }, `按线程/任务聚合：${[...threads.keys()].map((key) => `${key}(${threads.get(key).length})`).join(' · ') || '暂无'}`),
         ),
       )
     }
 
-    function DeliveryPanel({ delivery, tasks }) {
+    function DeliveryPanel({ delivery, tasks, onVerifyArtifacts }) {
       const [diff, setDiff] = useState('')
       const [diffFor, setDiffFor] = useState('')
+      const [verifyReport, setVerifyReport] = useState(null)
       if (delivery === null) return h('div', { style: S.empty }, '正在加载交付…')
+      const runVerify = async () => {
+        const report = await onVerifyArtifacts()
+        if (report !== undefined) setVerifyReport(report)
+      }
       const openDiff = async (artifactId) => {
         try {
           const value = await call('delivery.diff', { artifactId })
@@ -769,7 +848,12 @@ window.__ModuleLoader__.load({
       }
       return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
         h('div', { style: S.card },
-          h('strong', { style: { fontSize: 13 } }, '代码工件'),
+          h('div', { style: S.row },
+            h('strong', { style: { fontSize: 13 } }, '代码工件'),
+            h('span', { style: S.grow }),
+            h(Button, { onClick: () => { void runVerify() } }, '校验工件完整性')),
+          verifyReport === null ? null : h('p', { style: { ...S.muted, color: verifyReport.missing + verifyReport.corrupted === 0 ? '#05603a' : '#b42318' } },
+            `已校验 ${verifyReport.checked} 个工件：${verifyReport.ok} 正常 / ${verifyReport.missing} 缺失 / ${verifyReport.corrupted} 哈希不符`),
           h(Table, {
             columns: [
               { key: 'id', title: '工件', render: (row) => h('span', { style: S.code }, row.id) },
@@ -866,9 +950,57 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function SettingsPanel({ status, project, busy, act, onProbe }) {
+    // One example policy the settings page can insert: real commands, all optional
+    // except build and test.
+    /** Budget fields shown in Settings: [service field, label]. */
+    const BUDGET_FIELDS = [
+      ['maxParallelRuns', '最大并行运行'],
+      ['perRunMessageLimit', '每任务消息上限'],
+      ['hourlyMessageLimit', '每小时消息上限'],
+      ['maxRetries', '投递重试上限'],
+      ['perRunTokenLimit', '单次运行令牌上限'],
+      ['dailyTokenLimit', '24 小时令牌上限'],
+    ]
+
+    const samplePolicy = JSON.stringify({
+      checks: [
+        { type: 'build', command: 'npm run build', required: true },
+        { type: 'test', command: 'npm test', required: true },
+      ],
+    }, null, 2)
+
+    function SettingsPanel({ status, project, budgets, busy, act, onProbe, onSavePolicy, onSaveBudgets, onExport }) {
       const [probe, setProbe] = useState(null)
+      const [policyText, setPolicyText] = useState('')
+      const [policyError, setPolicyError] = useState('')
+      const [budgetDraft, setBudgetDraft] = useState(null)
       const env = status?.environment ?? {}
+      useEffect(() => {
+        if (project === undefined) return
+        setPolicyText(JSON.stringify(project.policy ?? {}, null, 2))
+      }, [project?.id, project?.policy])
+      useEffect(() => {
+        if (budgets === null || budgets === undefined) return
+        setBudgetDraft({
+          maxParallelRuns: budgets.max_parallel_runs,
+          perRunMessageLimit: budgets.per_run_message_limit,
+          hourlyMessageLimit: budgets.hourly_message_limit,
+          maxRetries: budgets.max_retries,
+          perRunTokenLimit: budgets.per_run_token_limit,
+          dailyTokenLimit: budgets.daily_token_limit,
+        })
+      }, [budgets])
+      const exportProject = async () => {
+        const snapshot = await onExport()
+        if (snapshot === undefined) return
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = `project-teams-${snapshot.project.id}-${Date.now()}.json`
+        anchor.click()
+        URL.revokeObjectURL(url)
+      }
       const runProbe = async (reuse) => {
         const value = await act('probe', () => call('m0.probe', { reuse }), 'M0 探针已执行')
         if (value !== undefined) { setProbe(value); onProbe() }
@@ -909,10 +1041,36 @@ window.__ModuleLoader__.load({
             JSON.stringify(probe.record ?? probe, null, 2).slice(0, 4000)),
         ),
         project === undefined ? null : h('div', { style: S.card },
-          h('strong', { style: { fontSize: 13 } }, '项目策略'),
+          h('strong', { style: { fontSize: 13 } }, '项目策略（可编辑）'),
           h('p', { style: S.muted }, '检查项是门禁在任务工作树中执行的命令。修改策略属于 Owner 操作，会写入审计日志。'),
-          h('pre', { style: { ...S.code, background: 'rgba(16,24,40,.04)', borderRadius: 8, padding: 10, whiteSpace: 'pre-wrap' } },
-            JSON.stringify(project.policy ?? {}, null, 2)),
+          h('textarea', { style: { ...S.area, minHeight: 120, fontFamily: T.mono, fontSize: 12 }, value: policyText, onChange: (event) => setPolicyText(event.target.value) }),
+          policyError === '' ? null : h('span', { style: { fontSize: 12, color: '#b42318' } }, policyError),
+          h('div', { style: S.row },
+            h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => {
+              try {
+                const parsed = JSON.parse(policyText === '' ? '{}' : policyText)
+                if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('策略必须是 JSON 对象')
+                setPolicyError('')
+                void onSavePolicy(parsed)
+              } catch (failure) {
+                setPolicyError(String(failure.message ?? failure))
+              }
+            } }, '保存策略'),
+            h(Button, { onClick: () => setPolicyText(samplePolicy) }, '填入模板')),
+        ),
+        project === undefined || budgetDraft === null ? null : h('div', { style: S.card },
+          h('strong', { style: { fontSize: 13 } }, '预算（令牌 / 消息 / 并行）'),
+          h('p', { style: S.muted }, '令牌数由宿主的 token 计量服务按会话日志回放得出，不产生模型调用；0 表示不限。'),
+          h('div', { style: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' } },
+            ...BUDGET_FIELDS.map(([field, label]) => h(Field, { key: field, label }, h('input', {
+              style: S.input,
+              type: 'number',
+              value: budgetDraft[field] ?? 0,
+              onChange: (event) => setBudgetDraft({ ...budgetDraft, [field]: Number(event.target.value) }),
+            })))),
+          h('div', { style: S.row },
+            h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => void onSaveBudgets(budgetDraft) }, '保存预算'),
+            h(Button, { disabled: busy !== '', onClick: () => void exportProject() }, '导出项目 JSON')),
         ),
       )
     }

@@ -73,6 +73,12 @@ DRAFT ──submit──▶ READY ──assign/claim──▶ ASSIGNED ──sta
 （`IN_REVIEW → VERIFIED → DONE`），每一步都重新读取任务与门禁，遇到第一次拒绝即停止。
 评审「要求修改」则把任务转 `REWORK`。任何一步都无法由 Bot 消息触发。
 
+## 任务编辑
+
+`updateTask` 只允许在 `DRAFT` / `READY` / `REWORK` / `BLOCKED` 改标题、描述、验收标准、优先级、风险与写入范围，
+角色限 Owner/PM，需要 `expectedVersion`，并写一条 `edit` 事件与审计。一旦开始执行（`RUNNING` 及之后）就拒绝编辑：
+验收标准是评审与门禁判定所依据的合约，事后修改等于静默绕过评审。
+
 ## 版本与幂等
 
 - `tasks.version` 每次变更递增；调用方传 `expectedVersion`，不匹配返回 `VERSION_CONFLICT`（HTTP 409）。

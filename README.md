@@ -82,7 +82,8 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 ## 测试
 
 ```sh
-npm test            # 47 个测试：单元 + 集成 + 安全
+npm test            # 51 个测试：单元 + 集成 + 安全
+npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration
 npm run test:security
@@ -90,3 +91,21 @@ npm run test:security
 
 集成测试使用真实 SQLite 与真实 `git worktree`（临时仓库），只把 DSH 会话边界替换为假实现 ——
 真实边界由运行中宿主内的 M0 探针与一次真实多 Agent 端到端运行覆盖。
+
+## 相对规格书的完成度（§15 Definition of Done 逐条）
+
+| DoD 要求 | 状态 | 证据 |
+| --- | --- | --- |
+| 当前 DSH 版本与全部关键 API 的兼容性矩阵已实测 | ✅ | `docs/compatibility-matrix.md`（C01–C11 + 现场证据） |
+| 项目与 4 Bot 的独立 Session 绑定真实可用，无 root→subagent 伪装 | ✅ | M0 探针 + 真实项目（4 Session）+ 51 个测试 |
+| 不同 Bot 拥有各自可恢复的 Session、角色、权限 | ✅ | 会话持久 + `verify:restart`（两次真实进程） |
+| 跨 Session 消息可持久化、去重、重试、追踪，离线表现符合说明 | ✅ | 41 条真实消息 / 30 条已确认；死信与重投测试 |
+| Task Engine 支持依赖、分配/认领、原子状态转移、审批与审计 | ✅ | 状态机测试 + 真实 T-4 事件链 |
+| 并发代码修改不共享同一可写 checkout，分支/工件可追踪 | ✅ | 每个 run 独立 worktree + 分支；AT-07 |
+| Reviewer 盲审、只读，CI 与门禁有效，不能自我审批 | ✅ | 盲审上下文 + 只读 checkout 树哈希校验 + AT-09/10 |
+| UI 提供项目/团队/任务/消息/工件/决策入口，非静态 mock | ✅（渲染需你现场确认） | 全部数据来自宿主 API；slot key 与安装版一致 |
+| E2E 示例项目通过适用 AT 项 | ✅ | 真实多 Agent 跑通，AT-01…AT-20 对照见测试报告 |
+| 崩溃恢复、权限边界、提示注入与预算防护验证 | ✅ | 租约过期恢复 + 权限测试 + 注入测试 + 令牌/消息/并行预算 |
+| 源码、可安装 Bundle、安装/使用/测试报告/已知问题/升级回滚手册 | ✅ | 本仓库 + `docs/` |
+
+**P0 已知边界**（非缺陷，属 P1/P2）：多人 RBAC、云端沙箱、远程 CI/PR、成本仪表板、消息全文索引。

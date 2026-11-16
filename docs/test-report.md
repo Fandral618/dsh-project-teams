@@ -15,11 +15,11 @@ node --test "tests/security/*.test.js"
 | 套件 | 数量 | 结果 | 覆盖内容 |
 | --- | --- | --- | --- |
 | `tests/unit/state-machine.test.js` | 13 | **全部通过** | 转移表可达性、非法/未知动作、角色拒绝、终态、权限矩阵（仅 Owner 可批准、归属校验、跨项目、未知操作） |
-| `tests/integration/engine.test.js` | 26 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
+| `tests/integration/engine.test.js` | 30 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
 | `tests/security/security.test.js` | 8 | **全部通过** | 路径围栏、路径段校验（含 Windows 设备名）、Bot 不能批准、批准绑定 revision、subagent 会话不能当成员、不可信消息框、Owner 不可被冒充、PM 不能归档/认领 |
-| **合计** | **47** | **47 通过 / 0 失败** | |
+| **合计** | **51** | **51 通过 / 0 失败** | |
 
-运行时间约 40 秒（集成测试为每个用例创建真实 `git init` 仓库与真实 worktree）。
+运行时间约 50 秒（集成测试为每个用例创建真实 `git init` 仓库与真实 worktree）。
 另有结构门禁：`node --check` 覆盖全部发布模块；`node scripts/demo-repo.mjs` 生成的演示仓库 build 检查通过、3 个测试通过。
 
 ## 二、运行中宿主的实测（M0）
@@ -116,3 +116,38 @@ node --test "tests/security/*.test.js"
 2. **整机重启**：无法在宿主内部执行（会杀掉执行验证的会话）。重启安全性依据是 Session 持久日志 + 重新激活后的
    身份复认（`m0-verify-*`）。运行手册给出人工步骤。
 3. **升级（跨 schema）**：只验证了同版本的停用/启用与重新安装；跨 schema 升级需按运行手册先备份。
+
+## 六、v1.1.0 补齐轮（对照规格书正文的 9 处缺口）
+
+| 缺口 | 处理 | 验证 |
+| --- | --- | --- |
+| ① 任务编辑 | `updateTask` + `tasks.update` 路由 + `pt_task action=edit` + `pt_owner task_edit` + 工作台内联编辑 | 新测试「a task can be edited…」；现场对 T-2 编辑成功（v2） |
+| ② 角色模板表 | 迁移 v2 建 `bot_templates` 并版本化；`briefFor()` 按 Bot 自己的模板版本渲染；`templates.list/write` 路由 + `upsertTemplate` | 迁移实测：4 个模板 + 4 个 Bot 绑定 `template_id` |
+| ③ 每项目 4–8 Bot | 去掉 `UNIQUE(project_id, role)`，加 `label`（`developer#2`），`createTeam` 接受重复角色 | 新测试「a project can hold more than four Bots」 |
+| ④ 令牌预算 | `ctx.tokenMeter.measure()` 采样 → `task_runs.tokens_used/base`；`per_run_token_limit`/`daily_token_limit` 在执行点强制 | 新测试「token budgets are measured and enforced」；现场写入预算 |
+| ⑤ Run 心跳 | `pt_run` 工具（heartbeat/status）+ 提交/验证/评审时自动续租 | 工具注册 + 代码路径；现场会话可用 |
+| ⑥ Reviewer 只读 checkout | 每个评审创建 detached worktree，记录 tree 哈希，判定时校验并在结论后清理 | 代码路径 + 评审流程测试；树被改动即拒绝结论 |
+| ⑦ 消息搜索/线程 | `messages.list` 支持 `query`/`threadId`；工作台搜索框 + 线程聚合统计 | 客户端实现 + 服务端 LIKE 搜索 |
+| ⑧ 设置/导出 UI | 策略编辑、预算编辑、项目 JSON 导出、工件完整性校验按钮 | 现场：`verify_artifacts` 1/1 ok；`export` 5 个任务 |
+| ⑨ 工件 hash 校验 | `verifyArtifacts` + `delivery.verify` 路由 | 新测试「artifact hashes are verified…」（含篡改检测） |
+
+### 进程级重启：已在隔离 profile 中真实验证
+
+`npm run verify:restart` 用临时 `DSH_HOME` + 临时 profile（`pt-restart`），把 bundle 装进去后
+**两次真实启动 Host 进程**（pid 9248 → pid 9488），第一次运行 M0 探针创建两个会话，第二次从持久日志里
+重新识别它们并读回投递标记：
+
+```json
+{ "verdict": "PASS", "aFound": true, "bFound": true, "durableMarkerPresent": true }
+```
+
+第二次启动读的是**冷会话的持久日志**（`sessionController.events` 分页），因此这条证据覆盖了
+「重启后仍能识别会话并读回投递内容」，也覆盖了冷会话读取路径。
+
+### 本轮同时修掉的移植性问题
+
+插件原先静态导入 `@deepseek-ai/dsh-tools` 的 `defineTool`。该导入只在 Desktop Host 内可解析
+（Desktop 的模块图锚定了 DSH 包），而 `dsh` CLI 启动一个 **linked 插件目录** 时会
+`ERR_MODULE_NOT_FOUND`。改为 `lib/host/dsh-tools.js`：优先用宿主实现，不可解析时回退到
+`lib/host/tool-def.js`（同契约的本地编译器：参数 DSL→JSON Schema、输出 schema、参数校验）。
+Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激活 —— 这正是重启验证得以完成的前提。

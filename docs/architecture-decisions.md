@@ -119,3 +119,29 @@
 
 **理由**：UI 与模型工具应当共享同一个业务 Service（规格 §9）；而「授权」类动作保持仅人类可达，避免模型自批。
 `wake` 只是把一条指令投递进某个 Bot 会话（等价于 UI 的「对该 Bot 说句话」），它不产生任何正式状态变更。
+
+## ADR-12 — 工具定义不依赖宿主的私有辅助函数
+
+**决策**：`lib/host/dsh-tools.js` 先尝试导入 `@deepseek-ai/dsh-tools` 的实现，导入失败时回退到
+`lib/host/tool-def.js`（同契约的本地编译器：参数 DSL→JSON Schema、输出 schema 归一化、参数校验）。
+
+**理由**：Desktop Host 能解析 `@deepseek-ai/*`（其模块图锚定安装目录），但 `dsh` CLI 启动一个 linked 插件目录时
+会 `ERR_MODULE_NOT_FOUND` —— 这会挡住隔离 profile 的重启验证，也意味着插件只能在 Desktop 里跑。
+回退实现让 bundle 在两种运行时都能激活；Desktop 行为不变。
+
+**代价**：本地编译器必须与宿主契约保持一致；用 51 个测试 + 真实工具调用（`pt_owner`、`pt_context`）持续校验。
+
+## ADR-13 — 角色模板是数据，不是代码
+
+**决策**：`bot_templates(role, version, prompt_text, tool_policy)`；Bot 记录创建时的 `template_id/version`，
+`briefFor()` 用它渲染。编辑模板产生新版本（`templates.write` → `upsertTemplate`），既有 Bot 不被静默改写。
+
+**理由**：规格 §4.1 把模板列为 P0 表；把它放进数据库使「角色说明」可审计、可版本化、可在不改代码的情况下调整。
+
+## ADR-14 — 令牌预算用宿主 token 计量，不估算
+
+**决策**：通过 `ctx.tokenMeter.measure(session).totalTokens` 采样，run 记 `tokens_base`（启动基线）与
+`tokens_used`（增量）；`per_run_token_limit` 在提交/验证处强制，`daily_token_limit` 在启动新 run 时强制。
+
+**理由**：该服务是会话日志的确定性回放，不产生模型调用；估算（例如按字符数）会给出无法解释的数字。
+不可用时明确记为 `usage_source: unavailable`，而不是编造 0。

@@ -101,7 +101,7 @@ export class FakeSessionAdapter {
     }
   }
 
-  recentUserTexts(sessionId, limit = 5) {
+  async recentUserTexts(sessionId, limit = 5) {
     return (this.sessions.get(sessionId)?.texts ?? []).slice(-limit)
   }
 }

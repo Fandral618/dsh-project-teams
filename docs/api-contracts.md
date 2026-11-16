@@ -61,6 +61,7 @@
 | `tasks.get` | GET | `taskId` | 任务、事件、运行、工件、评审、门禁 |
 | `tasks.create` | POST | `projectId`、`title`、`acceptance[]`、`description?`、`dependsOn[]`、`riskLevel?`、`priority?`、`writeScope?` | 任务 |
 | `tasks.transition` | POST | `taskId`、`action`、`reason?`、`expectedVersion?` | 任务 |
+| `tasks.update` | POST | `taskId`、`title?`、`description?`、`acceptance?[]`、`priority?`、`riskLevel?`、`writeScope?`、`expectedVersion?` | 任务（仅 DRAFT/READY/REWORK/BLOCKED 可改） |
 | `tasks.assign` | POST | `taskId`、`botId`、`expectedVersion` | 任务 |
 | `tasks.dependency` | POST | `taskId`、`dependsOn` | 依赖行 |
 | `tasks.verify` | POST | `taskId`、`types?[]` | 验证行（真的执行命令） |
@@ -71,6 +72,12 @@
 | `decisions.list` | GET | `projectId` | 待处理变更申请 + 被门禁卡住的任务 |
 | `decisions.decideChange` | POST | `changeId`、`decision`、`justification` | 变更申请 |
 | `decisions.approveTask` | POST | `taskId`、`decision`、`justification?`、`headCommit?` | 绑定到该 commit 的审批 |
+| `budgets.get` | GET | `projectId` | 预算行 |
+| `budgets.update` | POST | `projectId` + 预算字段 | 预算行 |
+| `templates.list` | GET | — | 全部角色模板（含版本） |
+| `templates.write` | POST | `role`、`promptText`、`toolPolicy?`、`skillRefs?` | 新版本模板 |
+| `delivery.verify` | GET | `projectId` | 工件哈希校验报告 |
+| `export.project` | GET | `projectId` | 项目 JSON 快照 |
 | `activity.list` | GET | `projectId`、`limit?` | 审计 + 任务事件（新→旧） |
 | `overview.get` | GET | `projectId` | 计数、进行中运行、阻塞、活动 |
 | `m0.get` / `m0.probe` / `m0.verify` | GET/POST | `reuse?` | M0 兼容性证据 |
@@ -88,8 +95,9 @@
 | --- | --- | --- |
 | `pt_whoami` | Session id、bot id、角色、项目、cwd | 手工登记会话时用 |
 | `pt_context` | 项目目标、团队、我的任务、收件箱、每个任务的门禁 | 只读简报 |
-| `pt_task` | `list` / `create` / `claim` / `start` / `submit_artifact` | `claim` 是带版本校验的原子认领；`start` 创建 worktree |
+| `pt_task` | `list` / `create` / `edit` / `claim` / `start` / `submit_artifact` | `claim` 是带版本校验的原子认领；`start` 创建 worktree |
 | `pt_task_transition` | `submit`、`assign`、`block`、`unblock`、`submit_review`、`verify`、`reject`、`rework_ready`、`complete`、`cancel` | 受状态机 + 角色 + 版本三重校验 |
+| `pt_run` | `heartbeat` / `status` | 续租一次运行（否则 30 分钟判为丢失） |
 | `pt_verify_run` | 对当前工件 commit 运行配置的检查 | 真实命令；记录退出码、日志路径、日志 SHA-256 |
 | `pt_review` | `context` / `request` / `submit` | `context` 返回盲审上下文；`submit` 提交结论与问题项 |
 | `pt_message_send` | 项目内点对点消息 | 持久入队，由分发器投递 |
@@ -100,7 +108,7 @@
 
 ### Owner 工具 `pt_owner`
 
-只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`wake`、`view`、`gate`。
+只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`task_transition`、`task_edit`、`wake`、`interrupt`、`view`、`gate`、`budgets`、`verify_artifacts`、`export`。
 `wake` 仅把一句话投递进目标 Bot 会话；**批准、暂停、归档、改策略不在此列**。
 
 ## 消息协议

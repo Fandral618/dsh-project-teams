@@ -81,6 +81,8 @@ qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy
 | `decisions.list` | GET | `projectId` | 待处理变更申请 + 被门禁卡住的任务 |
 | `decisions.decideChange` | POST | `changeId`、`decision`、`justification` | 变更申请 |
 | `decisions.executeMerge` | POST | `changeId` | 执行一个**已批准**的合并提案（重验证 base/head/门禁） |
+| `decisions.createPR` | POST | `changeId` | 为已批准的工件打开 PR（`git push` + `gh pr create`，记录 URL） |
+| `decisions.rollbackMerge` | POST | `changeId` | 回滚已执行的合并（`git revert -m 1`），生成 rollback 变更单 |
 | `decisions.approveTask` | POST | `taskId`、`decision`、`justification?`、`headCommit?` | 绑定到该 commit 的审批 |
 | `projectTemplates.list` | GET | — | 项目模板（含 policy） |
 | `projectTemplates.write` | POST | `name`、`description?`、`policy` | 发布/覆盖项目模板 |
@@ -122,7 +124,7 @@ qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy
 
 ### Owner 工具 `pt_owner`
 
-只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`task_transition`、`task_edit`、`execute_merge`、`wake`、`interrupt`、`view`、`gate`、`budgets`、`verify_artifacts`、`export`。
+只对非 Bot 会话开放，动作：`setup`、`task_create`、`task_submit`、`task_assign`、`task_transition`、`task_edit`、`execute_merge`、`create_pr`、`rollback_merge`、`wake`、`interrupt`、`view`、`gate`、`budgets`、`verify_artifacts`、`export`。
 `wake` 仅把一句话投递进目标 Bot 会话；**批准、暂停、归档、改策略不在此列**。
 
 ## 消息协议

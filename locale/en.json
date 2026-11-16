@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Project Teams",
+    "description": "Projects whose members are long-lived independent DSH Sessions (PM, Developer, Reviewer, QA), coordinated by a deterministic Host task engine with isolated Git worktrees, independent review and human approval gates.",
+    "detail": "docs/DETAIL.md"
+  }
+}

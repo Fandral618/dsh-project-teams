@@ -1,0 +1,8 @@
+# Normalise line endings for a cross-platform public repository.
+* text=auto eol=lf
+
+# Binary artefacts
+*.png binary
+*.jpg binary
+*.webp binary
+*.zstd binary

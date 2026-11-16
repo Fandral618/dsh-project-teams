@@ -1,0 +1,37 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  node:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # node:sqlite is used without a flag from Node 24; the DSH Desktop runtime
+        # this plugin targets is Node 24.21.
+        node: ['24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Show runtime
+        run: node --version && git --version
+      - name: Unit, integration and security tests
+        run: npm test
+      - name: Demo repository fixture
+        run: |
+          node scripts/demo-repo.mjs "$RUNNER_TEMP/demo"
+          node --check "$RUNNER_TEMP/demo/src/app.js"
+          node --test "$RUNNER_TEMP/demo/test/signup.test.js"
+      - name: Syntax gate over every shipped module
+        run: |
+          for file in index.js client.js lib/host/*.js scripts/*.mjs; do
+            node --check "$file"
+          done

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Project Teams",
+    "description": "项目制 AI 团队：每个成员都是长期存在、彼此独立的 DSH Session（PM / Developer / Reviewer / QA），由 Host 侧确定性任务引擎协调，使用隔离 Git 工作树、独立评审与人工审批门禁。",
+    "detail": "docs/DETAIL.md"
+  }
+}

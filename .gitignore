@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Run worktrees created by the plugin inside a bound project repository
+.project-teams/
+
+# Local state and logs
+*.log
+*.db
+*.db-wal
+*.db-shm
+state/
+coverage/
+tmp/
+.tmp/
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local env
+.env
+.env.*
+!.env.example

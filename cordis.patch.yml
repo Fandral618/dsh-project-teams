@@ -1,0 +1,22 @@
+# Project Teams bundle patch (Loader patch dialect: a top-level YAML array).
+#
+# One Host row. The Host plugin owns the project/team/task/message/artifact
+# domain, its SQLite store and the HTTP API the browser half calls; the browser
+# half is declared by `dsh.client` in package.json and loaded by the Client
+# module loader, not by a second Host row.
+- insert:
+    - id: project-teams
+      name: dsh-project-teams
+      config:
+        # Managed data root. Empty means "<DSH_HOME>/project-teams".
+        dataDir: ''
+        # Agent preset used for Bot Sessions when a bot template does not name one.
+        defaultAgentPreset: ''
+        # Maximum concurrent TaskRuns per project (P0 default from the spec).
+        maxParallelRuns: 3
+        # Directory INSIDE the project repository that holds run worktrees.
+        # It must stay inside the repository so a Bot's file sandbox allows the
+        # Developer to write there; the directory is added to .git/info/exclude.
+        worktreeDir: '.project-teams'
+        # Run the M0 Session probe once on activation (writes state/m0.json).
+        m0AutoProbe: true

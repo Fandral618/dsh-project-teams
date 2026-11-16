@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Project Teams">
+  <defs>
+    <linearGradient id="pt-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#pt-bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="12" y="18" width="16" height="12" rx="3"/>
+    <rect x="36" y="18" width="16" height="12" rx="3"/>
+    <rect x="24" y="38" width="16" height="12" rx="3"/>
+    <path d="M20 30v4h24v-4"/>
+    <path d="M32 34v4"/>
+  </g>
+  <circle cx="20" cy="18" r="2.4" fill="#ffffff"/>
+  <circle cx="44" cy="18" r="2.4" fill="#ffffff"/>
+  <circle cx="32" cy="50" r="2.4" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,70 @@
+{
+  "name": "dsh-project-teams",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Project Teams: projects whose members are long-lived independent DSH Sessions (PM / Developer / Reviewer / QA), coordinated by a deterministic Host task engine with isolated Git worktrees, independent review and human approval gates.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "docs",
+    "scripts",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:integration": "node --test \"tests/integration/*.test.js\"",
+    "test:security": "node --test \"tests/security/*.test.js\"",
+    "demo": "node scripts/demo-repo.mjs"
+  },
+  "license": "MIT",
+  "author": "Fandral618",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fandral618/dsh-project-teams.git"
+  },
+  "homepage": "https://github.com/Fandral618/dsh-project-teams#readme",
+  "bugs": {
+    "url": "https://github.com/Fandral618/dsh-project-teams/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "multi-agent",
+    "project-management",
+    "git-worktree",
+    "code-review"
+  ]
+}

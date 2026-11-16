@@ -398,6 +398,8 @@ window.__ModuleLoader__.load({
 
       const fitted = useRef('')
 
+      positionsRef.current = positions
+
       // Seed positions once per project: saved coordinates win, new Bots get a grid slot.
       // After seeding, fit the view once so a first-time project is not off-screen.
       useEffect(() => {
@@ -431,6 +433,7 @@ window.__ModuleLoader__.load({
       }, [canvas?.project?.id, nodes.length])
 
       const fitRef = useRef(null)
+      const positionsRef = useRef({})
 
       const persist = useCallback((nextPositions, nextView) => {
         const payload = {
@@ -491,26 +494,43 @@ window.__ModuleLoader__.load({
        * mouse). Listening on window for the duration of the gesture removes that whole
        * class of failure and keeps the math in world coordinates.
        */
+      /**
+       * Optional drag diagnostics: inert unless the page sets window.__ptDragLog to an
+       * array. Used to tell a product bug apart from synthetic-input limits when the
+       * canvas is driven over the DevTools protocol.
+       */
+      const record = (entry) => {
+        if (typeof window !== 'undefined' && Array.isArray(window.__ptDragLog)) {
+          window.__ptDragLog.push({ ...entry, at: Date.now() })
+        }
+      }
+
       const onNodePointerDown = (event, node) => {
+        record({ type: 'pointerdown', trusted: event.isTrusted, x: Math.round(event.clientX), y: Math.round(event.clientY), bot: node.botId })
         event.stopPropagation()
         onSelectBot(node.botId)
         const start = toLocal(event)
         const origin = positions[node.botId] ?? { x: 0, y: 0 }
         const zoom = view.zoom
         const move = (moveEvent) => {
+          record({ type: 'pointermove', trusted: moveEvent.isTrusted, x: Math.round(moveEvent.clientX), y: Math.round(moveEvent.clientY) })
           const point = toLocal(moveEvent)
-          setPositions((current) => ({
-            ...current,
-            [node.botId]: { x: Math.round(origin.x + (point.x - start.x) / zoom), y: Math.round(origin.y + (point.y - start.y) / zoom) },
-          }))
+          setPositions((current) => {
+            const next = {
+              ...current,
+              [node.botId]: { x: Math.round(origin.x + (point.x - start.x) / zoom), y: Math.round(origin.y + (point.y - start.y) / zoom) },
+            }
+            positionsRef.current = next
+            return next
+          })
         }
         const up = () => {
+          record({ type: 'pointerup' })
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
-          setPositions((current) => {
-            persist(current, view)
-            return current
-          })
+          const latest = positionsRef.current
+          record({ type: 'persist', nodes: Object.keys(latest ?? {}).length, bot: node.botId, at: latest?.[node.botId] })
+          persist(latest ?? {}, view)
         }
         window.addEventListener('pointermove', move)
         window.addEventListener('pointerup', up)

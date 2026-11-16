@@ -44,7 +44,7 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 | --- | --- | --- |
 | ![交付](docs/screenshots/04-delivery.png) | ![消息](docs/screenshots/05-messages.png) | ![决策](docs/screenshots/06-decisions.png) |
 
-设置（策略编辑、预算、M0 探针）：![设置](docs/screenshots/07-settings.png)
+设置（策略编辑、预算、角色模板、M0 探针）：![设置](docs/screenshots/07-settings.png)
 
 截图来自本机 DSH Desktop 的真实运行（项目「演示·账号系统」），不是静态 mock：
 每个数字、每条消息、每次门禁结论都读自宿主数据库。截图里出现的本机路径是本项目演示机器的路径。
@@ -99,7 +99,7 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 ## 测试
 
 ```sh
-npm test            # 51 个测试：单元 + 集成 + 安全
+npm test            # 54 个测试：单元 + 集成 + 安全
 npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration
@@ -126,3 +126,17 @@ npm run test:security
 | 源码、可安装 Bundle、安装/使用/测试报告/已知问题/升级回滚手册 | ✅ | 本仓库 + `docs/` |
 
 **P0 已知边界**（非缺陷，属 P1/P2）：多人 RBAC、云端沙箱、远程 CI/PR、成本仪表板、消息全文索引。
+
+## P1 进展（v1.2.0）
+
+| 规格 §0.4 P1 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 项目归档 / 恢复 | ✅ | `projects.restore` + 工作台「从归档恢复」；恢复写审计 |
+| 项目模板 | ◐ | 创建项目时可带 `policy`；预设模板库未做（下一步） |
+| 自定义角色 / 角色模板 | ◐ | 模板已版本化并可在设置页发布新版本；自定义**新角色**（超出 pm/developer/reviewer/qa）未做 |
+| 消息搜索 | ✅ | `messages.list` 的 `query` + 工作台搜索框 |
+| 频道 / 群组消息 | ✗ | 未做（当前是点对点 + 角色寻址） |
+| 质量仪表板 / 成本监控 | ✅ | 新「质量」标签页：完成率、返工率、平均周期、检查通过率、findings 分布、令牌用量与预算、消息/死信、决策计数 |
+| Timeline | ◐ | 活动记录 + 任务事件已可查；独立时间线视图未做 |
+| PR 集成 / 回滚 | ✗ | 未做；合并仍由 Owner 在本地执行（提案已有） |
+| 双审 / 交叉模型 | ✗ | 未做 |

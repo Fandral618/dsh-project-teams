@@ -757,3 +757,88 @@ test('artifact hashes are verified, and a tampered file is reported', async () =
     env.close()
   }
 })
+
+// ------------------------------------------------------------ P1 increments
+
+test('an archived project can be restored, and restoring is audited (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    env.service.archiveProject(owner, project.id)
+    assert.equal(env.service.project(project.id).status, 'archived')
+    assert.throws(() => env.service.createTask(owner, project.id, { title: 'late', acceptance: ['x'] }), /archived/)
+    const restored = env.service.restoreProject(owner, project.id)
+    assert.equal(restored.status, 'active')
+    // Work is possible again, and the restore is in the audit trail.
+    const task = env.service.createTask(owner, project.id, { title: 'after restore', acceptance: ['x'] })
+    assert.equal(task.status, 'DRAFT')
+    const rows = env.db.prepare("SELECT * FROM audit_events WHERE action IN ('project.archive','project.restore') ORDER BY seq").all()
+    assert.deepEqual(rows.map((row) => row.action), ['project.archive', 'project.restore'])
+    // A bot cannot restore (owner-only).
+    assert.throws(() => env.service.restoreProject(dev.actor, project.id), /may not perform/)
+  } finally {
+    env.close()
+  }
+})
+
+test('the dashboard reports task, check, review and cost metrics from engine rows (P1)', async () => {
+  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }] })
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const reviewer = actorOf(bots, 'reviewer')
+    const task = await readyTask(env, project, dev)
+    const run = await env.service.startRun(dev.actor, task.id)
+    writeFileSync(join(run.worktree_path, 'dash.js'), 'x\n')
+    await env.service.submitArtifact(dev.actor, task.id, { message: 'dash' })
+    env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
+    await env.service.requestReview(dev.actor, task.id)
+    await env.service.runVerification(dev.actor, task.id)
+    await env.service.submitReview(reviewer.actor, {
+      taskId: task.id,
+      verdict: 'APPROVE',
+      findings: [{ severity: 'nit', summary: 'naming', file: 'dash.js' }],
+    })
+    const metrics = env.service.dashboard(owner, project.id)
+    assert.equal(metrics.tasks.total, 1)
+    assert.equal(metrics.tasks.done, 1)
+    assert.equal(metrics.tasks.completionRate, 100)
+    assert.equal(metrics.runs.total, 1)
+    assert.equal(metrics.checks.total, 1)
+    assert.equal(metrics.checks.passed, 1)
+    assert.equal(metrics.checks.passRate, 100)
+    assert.equal(metrics.reviews.approved, 1)
+    assert.equal(metrics.reviews.findings.nit, 1)
+    assert.equal(typeof metrics.cost.tokensTotal, 'number')
+    assert.equal(metrics.approvals.pending, 0)
+  } finally {
+    env.close()
+  }
+})
+
+test('a new role template version does not rewrite an existing Bot (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = bots.find((bot) => bot.role === 'developer')
+    assert.equal(Number(dev.template_version), 1)
+    const created = env.service.upsertTemplate(owner, {
+      role: 'developer',
+      promptText: 'You are the Developer bot of {{project}}. Work only inside your run worktree.',
+    })
+    assert.equal(Number(created.version), 2)
+    assert.equal(Number(env.service.bot(dev.id).template_version), 1)
+    // A newly created Bot picks up the new version.
+    const second = await env.service.createTeam(owner, project.id, { roles: ['qa'] })
+    const qaTemplate = env.service.latestTemplate('qa')
+    assert.equal(Number(second[0].template_version), Number(qaTemplate.version))
+    const developerTemplate = env.service.latestTemplate('developer')
+    assert.equal(Number(developerTemplate.version), 2)
+    // And the rendered brief uses the Bot's own version.
+    const brief = env.service.briefFor(env.service.project(project.id), env.service.bot(dev.id))
+    assert.ok(brief.includes('Developer'))
+  } finally {
+    env.close()
+  }
+})

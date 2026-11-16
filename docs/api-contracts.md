@@ -53,6 +53,7 @@
 | `projects.create` | POST | `name`、`repoRoot`、`goal?`、`defaultBranch?`、`policy?` | 项目 + 仓库校验结果 |
 | `projects.update` | POST | `projectId`、`goal?`、`defaultBranch?`、`policy?` | 项目 |
 | `projects.archive` | POST | `projectId` | 项目（排队消息被丢弃） |
+| `projects.restore` | POST | `projectId` | 项目（从归档恢复） |
 | `projects.pause` / `projects.resume` | POST | `projectId` | 项目 |
 | `team.list` | GET | `projectId` | Bot 列表 + 存活状态 + 当前任务 |
 | `team.create` | POST | `projectId`、`roles?`、`presets?`、`cwd?` | 新建的 Bot（会创建会话） |
@@ -80,6 +81,7 @@
 | `export.project` | GET | `projectId` | 项目 JSON 快照 |
 | `activity.list` | GET | `projectId`、`limit?` | 审计 + 任务事件（新→旧） |
 | `overview.get` | GET | `projectId` | 计数、进行中运行、阻塞、活动 |
+| `dashboard.get` | GET | `projectId` | 质量与成本指标 |
 | `m0.get` / `m0.probe` / `m0.verify` | GET/POST | `reuse?` | M0 兼容性证据 |
 
 常见错误码：`VERSION_CONFLICT`、`ILLEGAL_TRANSITION`、`ROLE_FORBIDDEN`、`FORBIDDEN`、`FORBIDDEN_OWNERSHIP`、

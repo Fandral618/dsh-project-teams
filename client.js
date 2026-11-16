@@ -268,6 +268,7 @@ window.__ModuleLoader__.load({
       const [expandedTask, setExpandedTask] = useState('')
       const [taskDetail, setTaskDetail] = useState(null)
       const [budgetsState, setBudgets] = useState({ projectId: '', budgets: null })
+      const [metrics, setMetrics] = useState(null)
       const mounted = useRef(true)
 
       useEffect(() => () => { mounted.current = false }, [])
@@ -296,7 +297,7 @@ window.__ModuleLoader__.load({
       const refreshProject = useCallback(async () => {
         if (projectId === '') return
         await guard('project', async () => {
-          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets] = await Promise.all([
+          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets, nextMetrics] = await Promise.all([
             call('overview.get', { projectId }),
             call('team.list', { projectId }),
             call('tasks.list', { projectId }),
@@ -305,6 +306,7 @@ window.__ModuleLoader__.load({
             call('decisions.list', { projectId }),
             call('activity.list', { projectId, limit: 60 }),
             call('budgets.get', { projectId }).catch(() => null),
+            call('dashboard.get', { projectId }).catch(() => null),
           ])
           if (!mounted.current) return
           setOverview(nextOverview)
@@ -315,6 +317,7 @@ window.__ModuleLoader__.load({
           setDecisions(nextDecisions)
           setActivity(nextActivity)
           setBudgets({ projectId, budgets: nextBudgets })
+          setMetrics(nextMetrics)
         })
       }, [guard, projectId])
 
@@ -368,6 +371,7 @@ window.__ModuleLoader__.load({
         onCreate: (input) => act('create-project', () => call('projects.create', input), '项目已创建，下一步生成团队。'),
         onArchive: (id) => act('archive', () => call('projects.archive', { projectId: id }), '项目已归档'),
         onPause: (id, paused) => act('pause', () => call('projects.pause', { projectId: id, paused }), paused ? '项目已暂停' : '项目已恢复'),
+        onRestore: (id) => act('restore', () => call('projects.restore', { projectId: id }), '项目已从归档恢复'),
       })
 
       const OverviewTab = h(OverviewPanel, { project: selected, overview, activity, onDecide: () => setTab('decisions') })
@@ -405,6 +409,7 @@ window.__ModuleLoader__.load({
         onApproveTask: (taskId, decision, headCommit, justification) => act('approve', () => call('decisions.approveTask', { taskId, decision, headCommit, justification }), decision === 'APPROVE' ? '审批已记录（批准）' : '审批已记录（拒绝）'),
       })
 
+      const QualityTab = h(QualityPanel, { metrics })
       const SettingsTab = h(SettingsPanel, {
         status,
         project: selected,
@@ -423,6 +428,7 @@ window.__ModuleLoader__.load({
         ['tasks', '任务'],
         ['messages', '消息'],
         ['delivery', '交付'],
+        ['quality', '质量'],
         ['decisions', `决策${decisions !== null && (decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length) > 0 ? ` (${decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length})` : ''}`],
         ['projects', '项目'],
         ['settings', '设置'],
@@ -434,6 +440,7 @@ window.__ModuleLoader__.load({
         tasks: TasksTab,
         messages: MessagesTab,
         delivery: DeliveryTab,
+        quality: QualityTab,
         decisions: DecisionsTab,
         projects: ProjectsTab,
         settings: SettingsTab,
@@ -465,7 +472,7 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------- panels
 
-    function ProjectsPanel({ projects, selected, onSelect, onCreate, onArchive, onPause, busy }) {
+    function ProjectsPanel({ projects, selected, onSelect, onCreate, onArchive, onPause, onRestore, busy }) {
       const [name, setName] = useState('')
       const [goal, setGoal] = useState('')
       const [repoRoot, setRepoRoot] = useState('')
@@ -521,8 +528,10 @@ window.__ModuleLoader__.load({
               { key: 'counts', title: '团队 / 未完成 / 运行中', render: (row) => `${row.counts.bots} / ${row.counts.openTasks} / ${row.counts.activeRuns}` },
               { key: 'sel', title: '', render: (row) => h('div', { style: S.row },
                 h(Button, { onClick: () => onSelect(row.id) }, row.id === selected?.id ? '当前项目' : '打开'),
-                h(Button, { onClick: () => onPause(row.id, row.status !== 'paused') }, row.status === 'paused' ? '恢复' : '暂停'),
-                h(Button, { kind: 'danger', onClick: () => onArchive(row.id) }, '归档'),
+                row.status === 'archived'
+                  ? h(Button, { kind: 'primary', onClick: () => onRestore(row.id) }, '从归档恢复')
+                  : h(Button, { onClick: () => onPause(row.id, row.status !== 'paused') }, row.status === 'paused' ? '恢复运行' : '暂停'),
+                row.status === 'archived' ? null : h(Button, { kind: 'danger', onClick: () => onArchive(row.id) }, '归档'),
               ) },
             ],
             rows: projects,
@@ -904,6 +913,55 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function QualityPanel({ metrics }) {
+      if (metrics === null || metrics === undefined) return h('div', { style: S.empty }, '正在加载质量与成本…')
+      const card = (title, rows) => h('div', { style: S.card },
+        h('strong', { style: { fontSize: 13 } }, title),
+        h(Table, {
+          columns: [
+            { key: 'k', title: '指标', render: (row) => row.k },
+            { key: 'v', title: '值', render: (row) => h('span', { style: { fontFamily: T.mono } }, String(row.v)) },
+          ],
+          rows,
+        }))
+      return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
+        h('p', { style: S.muted }, '全部指标由引擎自己的行计算（任务事件、运行、检查、评审、审批），与交付页的数字同源。'),
+        h('div', { style: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' } },
+          card('任务', [
+            { k: '任务总数', v: metrics.tasks.total },
+            { k: '已完成 / 进行中 / 已取消', v: `${metrics.tasks.done} / ${metrics.tasks.open} / ${metrics.tasks.cancelled}` },
+            { k: '完成率', v: `${metrics.tasks.completionRate}%` },
+            { k: '返工任务数', v: `${metrics.tasks.reworkedTasks}（${metrics.tasks.reworkRate}%）` },
+            { k: '平均周期（分钟）', v: metrics.tasks.avgCycleMinutes },
+          ]),
+          card('运行与检查', [
+            { k: '运行总数 / 进行中', v: `${metrics.runs.total} / ${metrics.runs.active}` },
+            { k: '待恢复 / 已取消', v: `${metrics.runs.recovery} / ${metrics.runs.cancelled}` },
+            { k: '检查次数', v: metrics.checks.total },
+            { k: '通过 / 失败', v: `${metrics.checks.passed} / ${metrics.checks.failed}` },
+            { k: '检查通过率', v: `${metrics.checks.passRate}%` },
+            { k: '用量来源', v: metrics.checks.usageSource },
+          ]),
+          card('评审', [
+            { k: '评审总数', v: metrics.reviews.total },
+            { k: '批准 / 要求修改 / 无法判定', v: `${metrics.reviews.approved} / ${metrics.reviews.changesRequested} / ${metrics.reviews.inconclusive}` },
+            { k: '待结论', v: metrics.reviews.pending },
+            { k: '问题项（blocker/critical/major/minor/nit）', v: `${metrics.reviews.findings.blocker ?? 0}/${metrics.reviews.findings.critical ?? 0}/${metrics.reviews.findings.major ?? 0}/${metrics.reviews.findings.minor ?? 0}/${metrics.reviews.findings.nit ?? 0}` },
+          ]),
+          card('成本与消息', [
+            { k: '累计令牌', v: metrics.cost.tokensTotal },
+            { k: '近 24h 令牌', v: `${metrics.cost.tokensToday}（上限 ${metrics.cost.tokenBudgetPerDay || '不限'}）` },
+            { k: '单次运行上限', v: metrics.cost.tokenBudgetPerRun || '不限' },
+            { k: '消息数 / 死信', v: `${metrics.cost.messages} / ${metrics.cost.deadLetters}` },
+          ]),
+          card('决策', [
+            { k: '待处理', v: metrics.approvals.pending },
+            { k: '已批准 / 已拒绝', v: `${metrics.approvals.approved} / ${metrics.approvals.rejected}` },
+          ]),
+        ),
+      )
+    }
+
     function DecisionsPanel({ decisions, busy, onDecideChange, onApproveTask }) {
       const [justification, setJustification] = useState('')
       if (decisions === null) return h('div', { style: S.empty }, '正在加载决策…')
@@ -974,6 +1032,10 @@ window.__ModuleLoader__.load({
       const [policyText, setPolicyText] = useState('')
       const [policyError, setPolicyError] = useState('')
       const [budgetDraft, setBudgetDraft] = useState(null)
+      const [templates, setTemplates] = useState([])
+      const [templateRole, setTemplateRole] = useState('developer')
+      const [templateText, setTemplateText] = useState('')
+      const [templateStatus, setTemplateStatus] = useState('')
       const env = status?.environment ?? {}
       useEffect(() => {
         if (project === undefined) return
@@ -990,6 +1052,17 @@ window.__ModuleLoader__.load({
           dailyTokenLimit: budgets.daily_token_limit,
         })
       }, [budgets])
+      const loadTemplates = async () => {
+        try {
+          const rows = await call('templates.list')
+          setTemplates(rows)
+          const latest = rows.find((row) => row.role === templateRole)
+          if (latest !== undefined && templateText === '') setTemplateText(String(latest.prompt_text ?? ''))
+        } catch (failure) {
+          setTemplateStatus(String(failure?.message ?? failure))
+        }
+      }
+      useEffect(() => { void loadTemplates() }, [])
       const exportProject = async () => {
         const snapshot = await onExport()
         if (snapshot === undefined) return
@@ -1057,6 +1130,51 @@ window.__ModuleLoader__.load({
               }
             } }, '保存策略'),
             h(Button, { onClick: () => setPolicyText(samplePolicy) }, '填入模板')),
+        ),
+        h('div', { style: S.card },
+          h('strong', { style: { fontSize: 13 } }, '角色模板（版本化）'),
+          h('p', { style: S.muted }, 'Bot 创建时绑定当时的模板版本；修改会生成新版本，不会静默改写已有 Bot 的说明。'),
+          h(Table, {
+            columns: [
+              { key: 'role', title: '角色', render: (row) => row.role },
+              { key: 'version', title: '版本', render: (row) => 'v' + row.version },
+              { key: 'len', title: '字符数', render: (row) => String((row.prompt_text ?? '').length) },
+              { key: 'at', title: '发布时间', render: (row) => when(row.created_at) },
+            ],
+            rows: templates,
+            empty: '尚无模板。',
+          }),
+          h('div', { style: S.row },
+            h('select', {
+              style: { ...S.input, maxWidth: 160 },
+              value: templateRole,
+              onChange: async (event) => {
+                const role = event.target.value
+                setTemplateRole(role)
+                const latest = templates.find((row) => row.role === role)
+                setTemplateText(String(latest?.prompt_text ?? ''))
+              },
+            }, ['pm', 'developer', 'reviewer', 'qa'].map((role) => h('option', { key: role, value: role }, role))),
+            h('span', { style: S.muted }, '选择角色后可编辑正文并发布新版本'),
+          ),
+          h('textarea', {
+            style: { ...S.area, minHeight: 140, fontFamily: T.mono, fontSize: 12 },
+            value: templateText,
+            onChange: (event) => setTemplateText(event.target.value),
+            placeholder: '模板正文，可用 {{project}} {{projectId}} {{botId}} {{role}} 占位符',
+          }),
+          h('div', { style: S.row },
+            h(Button, { kind: 'primary', disabled: busy !== '' || templateText.trim() === '', onClick: async () => {
+              try {
+                const created = await call('templates.write', { role: templateRole, promptText: templateText })
+                setTemplateStatus(`已发布 ${templateRole} v${created.version}（既有 Bot 仍用旧版本）`)
+                await loadTemplates()
+              } catch (failure) {
+                setTemplateStatus(String(failure?.message ?? failure))
+              }
+            } }, '发布新版本'),
+            templateStatus === '' ? null : h('span', { style: S.muted }, templateStatus),
+          ),
         ),
         project === undefined || budgetDraft === null ? null : h('div', { style: S.card },
           h('strong', { style: { fontSize: 13 } }, '预算（令牌 / 消息 / 并行）'),

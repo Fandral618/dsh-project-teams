@@ -14,6 +14,13 @@
 `lib/host/permissions.js` 中的 `authorize(actor, operation, {projectScope, ownsResource})` 实现下表。
 拒绝会以 `denied` 写入审计，并返回 `FORBIDDEN` / `FORBIDDEN_OWNERSHIP` / `CROSS_PROJECT` / `UNKNOWN_OPERATION`。
 
+## 权限模型：能力（capability）
+
+角色只是标签，真正决定权限的是角色的**能力集合**：`coordinate` / `write` / `review` / `verify` / `message`。
+内置四角色能力固定（pm: coordinate+message；developer: write+message；reviewer: review+message；
+qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy.capabilities` 里声明能力，无需改动 ACL 代码；
+未声明能力的未知角色只有 `message`，因此拼错角色名不会意外获得权限。
+
 ## 权限矩阵（P0）
 
 | 操作 | Owner | PM | Developer | Reviewer | QA |
@@ -50,7 +57,7 @@
 | `status` | GET | — | 插件版本、数据目录、运行时事实、预设、预算 |
 | `projects.list` | GET | — | 项目摘要 + 计数 |
 | `projects.get` | GET | `projectId` | `{ project, overview }` |
-| `projects.create` | POST | `name`、`repoRoot`、`goal?`、`defaultBranch?`、`policy?` | 项目 + 仓库校验结果 |
+| `projects.create` | POST | `name`、`repoRoot`、`goal?`、`defaultBranch?`、`policy?`、`templateId?` | 项目 + 仓库校验结果 |
 | `projects.update` | POST | `projectId`、`goal?`、`defaultBranch?`、`policy?` | 项目 |
 | `projects.archive` | POST | `projectId` | 项目（排队消息被丢弃） |
 | `projects.restore` | POST | `projectId` | 项目（从归档恢复） |
@@ -74,6 +81,8 @@
 | `decisions.decideChange` | POST | `changeId`、`decision`、`justification` | 变更申请 |
 | `decisions.executeMerge` | POST | `changeId` | 执行一个**已批准**的合并提案（重验证 base/head/门禁） |
 | `decisions.approveTask` | POST | `taskId`、`decision`、`justification?`、`headCommit?` | 绑定到该 commit 的审批 |
+| `projectTemplates.list` | GET | — | 项目模板（含 policy） |
+| `projectTemplates.write` | POST | `name`、`description?`、`policy` | 发布/覆盖项目模板 |
 | `budgets.get` | GET | `projectId` | 预算行 |
 | `budgets.update` | POST | `projectId` + 预算字段 | 预算行 |
 | `templates.list` | GET | — | 全部角色模板（含版本） |

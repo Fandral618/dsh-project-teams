@@ -15,9 +15,9 @@ node --test "tests/security/*.test.js"
 | 套件 | 数量 | 结果 | 覆盖内容 |
 | --- | --- | --- | --- |
 | `tests/unit/state-machine.test.js` | 13 | **全部通过** | 转移表可达性、非法/未知动作、角色拒绝、终态、权限矩阵（仅 Owner 可批准、归属校验、跨项目、未知操作） |
-| `tests/integration/engine.test.js` | 38 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
+| `tests/integration/engine.test.js` | 40 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
 | `tests/security/security.test.js` | 8 | **全部通过** | 路径围栏、路径段校验（含 Windows 设备名）、Bot 不能批准、批准绑定 revision、subagent 会话不能当成员、不可信消息框、Owner 不可被冒充、PM 不能归档/认领 |
-| **合计** | **59** | **59 通过 / 0 失败** | |
+| **合计** | **61** | **61 通过 / 0 失败** | |
 
 运行时间约 50 秒（集成测试为每个用例创建真实 `git init` 仓库与真实 worktree）。
 另有结构门禁：`node --check` 覆盖全部发布模块；`node scripts/demo-repo.mjs` 生成的演示仓库 build 检查通过、3 个测试通过。
@@ -189,3 +189,13 @@ Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激
 - `policy.reviewCount = 2` 时，`requestReview` 为两个 reviewer 各建一份评审（各自独立 checkout），返回 `requested[]/requiredReviews`。
 - 门禁按 reviewer 去重：两个 APPROVE → `PASS`；只有一个 → `INCOMPLETE`（原因写明 1/2）；任一 CHANGES_REQUESTED → `FAIL`。
 - 新测试两条（双批准通过、单批准不足 / 一批准一拒绝则 FAIL）。「交叉模型」由第二位 reviewer 的 Agent 预设表达（测试里用 `reviewer#2: standard`）。
+
+## 十一、P1 增量（v1.5.0）：项目模板 + 自定义角色
+
+- **能力化 ACL**：操作矩阵与状态机都按能力判定（coordinate / write / review / verify / message）；内置角色映射固定，
+  自定义角色在角色模板 `tool_policy.capabilities` 声明；未知角色默认只有 `message`。
+- **自定义角色**：`upsertTemplate` 接受任意合法角色名，非内置角色必须声明能力；`createTeam` 只要存在模板即可建该角色的 Bot；
+  `requestReview` 的评审池与 `submitReview` 的权限都按能力筛选。
+  测试覆盖：`architect`（仅 review）不能认领任务但可作评审者；`frontend`（仅 write）可认领、开跑、提交。
+- **项目模板**：迁移 v3 + 内置 `web-node`/`python`/`minimal`；`projects.create` 支持 `templateId`，显式字段覆盖模板值；
+  Owner 可发布自定义模板，Bot 不能；工作台「项目」页新增模板下拉。

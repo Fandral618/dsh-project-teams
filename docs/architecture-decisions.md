@@ -154,3 +154,12 @@
 **理由**：规格 §6.3 明确「合并前重验当前 commit 与 base 是否仍满足检查，不复用过期报告」。
 把审批与执行分开，使「批准」不隐含「随时可合并」，也让执行可以重复调用而不会二次合并（幂等）。
 执行器只接受 `APPROVED` 的变更单，模型无法用执行端点绕过审批。
+
+## ADR-16 — 双审与"交叉模型"用策略 + 预设表达
+
+**决策**：`projects.policy.reviewCount` 决定需要几个独立 reviewer 的批准；`requestReview` 为每个 active reviewer 各建一份
+评审（各自独立的只读 checkout）；门禁按 reviewer 去重后要求 N 个 APPROVE，任一拒绝即 FAIL。
+「交叉模型」不引入新机制：额外 reviewer 用不同 Agent 预设创建（预设决定模型路由），例如 `reviewer#2` 用 `standard`。
+
+**理由**：避免为"多模型"再造一套 provider 抽象；DSH 的模型选择本来就绑定在会话预设上，复用它是唯一不会漂移的做法。
+独立 checkout 保证两个评审看到的是同一个 commit 的同一份快照，且各自改动会被树哈希发现。

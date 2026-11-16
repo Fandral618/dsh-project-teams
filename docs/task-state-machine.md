@@ -58,7 +58,8 @@ DRAFT ──submit──▶ READY ──assign/claim──▶ ASSIGNED ──sta
 1. 没有 `head_commit` → `INCOMPLETE`。
 2. 当前 head 没有工件 → `INCOMPLETE`（完全没有工件）或 `STALE`（只有旧工件）。
 3. 每个**必需**检查：以该 commit 的最新证据为准。`FAIL` → `FAIL`；缺失 → `INCOMPLETE`；只有别的 commit 的证据 → `STALE`。
-4. 最新评审：没有评审 → `INCOMPLETE`；未出结论 → `INCOMPLETE`；绑定到别的 commit → `STALE`；
+4. 评审：按 reviewer 取当前 head 上最新一条；需要 `policy.reviewCount` 个**不同 reviewer** 的 APPROVE；
+   任一 CHANGES_REQUESTED（或带 blocker/critical 的 APPROVE）→ `FAIL`；不足数量 → `INCOMPLETE`；绑定到别的 commit → `STALE`；
    `CHANGES_REQUESTED` → `FAIL`；`APPROVE` 却带 blocker/critical 问题项 → `FAIL`。
 5. 风险 `high`（或策略 `requireApprovalForDone`）：必须有
    `(subject_type='task', subject_id, subject_revision = head)` 的 `APPROVE` 审批，否则 `NEEDS_HUMAN`

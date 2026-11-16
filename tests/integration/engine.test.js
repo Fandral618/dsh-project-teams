@@ -956,3 +956,76 @@ test('a merge is refused when the base branch moved, the worktree is dirty or a 
     env.close()
   }
 })
+
+// ------------------------------------------------------------ dual review
+
+test('a dual-review policy needs two independent approvals before PASS (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env, {
+      checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }],
+      reviewCount: 2,
+    })
+    // A second reviewer with its own preset — the preset selects the model route,
+    // which is how cross-model review is expressed.
+    const extra = await env.service.createTeam(owner, project.id, { roles: ['reviewer'], presets: { 'reviewer#2': 'standard' } })
+    const dev = actorOf(bots, 'developer')
+    const reviewerA = actorOf(bots, 'reviewer')
+    const reviewerB = actorOf([...bots.filter((bot) => bot.role !== 'reviewer'), ...extra], 'reviewer')
+    const task = await readyTask(env, project, dev)
+    const run = await env.service.startRun(dev.actor, task.id)
+    writeFileSync(join(run.worktree_path, 'dual.js'), 'x\n')
+    await env.service.submitArtifact(dev.actor, task.id, { message: 'dual' })
+    env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
+    const requested = await env.service.requestReview(dev.actor, task.id)
+    assert.equal(requested.requiredReviews, 2)
+    assert.equal(requested.requested.length, 2, 'two independent reviewers were asked')
+    await env.service.runVerification(dev.actor, task.id)
+
+    // One approval is not enough.
+    await env.service.submitReview(reviewerA.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    let gate = env.service.gate(task.id)
+    assert.equal(gate.status, 'INCOMPLETE')
+    assert.ok(gate.reasons.some((reason) => reason.includes('1/2')))
+
+    // The second approval completes it.
+    await env.service.submitReview(reviewerB.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    gate = env.service.gate(task.id)
+    assert.equal(gate.status, 'PASS')
+    assert.equal(env.service.task(task.id).status, 'DONE')
+  } finally {
+    env.close()
+  }
+})
+
+test('one reviewer requesting changes fails a dual-review gate even when the other approves (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env, {
+      checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }],
+      reviewCount: 2,
+    })
+    const extra = await env.service.createTeam(owner, project.id, { roles: ['reviewer'] })
+    const dev = actorOf(bots, 'developer')
+    const reviewerA = actorOf(bots, 'reviewer')
+    const reviewerB = actorOf([...bots.filter((bot) => bot.role !== 'reviewer'), ...extra], 'reviewer')
+    const task = await readyTask(env, project, dev)
+    const run = await env.service.startRun(dev.actor, task.id)
+    writeFileSync(join(run.worktree_path, 'dual2.js'), 'x\n')
+    await env.service.submitArtifact(dev.actor, task.id, { message: 'dual2' })
+    env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
+    await env.service.requestReview(dev.actor, task.id)
+    await env.service.runVerification(dev.actor, task.id)
+    await env.service.submitReview(reviewerA.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+    await env.service.submitReview(reviewerB.actor, {
+      taskId: task.id,
+      verdict: 'CHANGES_REQUESTED',
+      findings: [{ severity: 'major', summary: 'missing edge case', file: 'dual2.js' }],
+    })
+    const gate = env.service.gate(task.id)
+    assert.equal(gate.status, 'FAIL')
+    assert.notEqual(env.service.task(task.id).status, 'DONE')
+  } finally {
+    env.close()
+  }
+})

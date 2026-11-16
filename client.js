@@ -571,7 +571,7 @@ window.__ModuleLoader__.load({
         const byCentre = b.y + NODE_H / 2
         const down = byCentre >= ayCentre
         // Stagger parallel edges so two links between different pairs stay readable.
-        const offset = 34 + (index % 4) * 16
+        const offset = 40 + (index % 6) * 26
         const band = down ? box.bottom + offset : box.top - offset
         const startY = down ? a.y + NODE_H : a.y
         const endY = down ? b.y + NODE_H : b.y
@@ -664,11 +664,11 @@ window.__ModuleLoader__.load({
                     markerHeight: 6,
                     orient: 'auto-start-reverse',
                   }, h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color })))),
-              edges.map((edge) => {
+              edges.map((edge, edgeIndex) => {
                 const selected = edge.id === selectedEdgeId
                 return h('path', {
                   key: edge.id,
-                  d: path(edge.from, edge.to),
+                  d: path(edge.from, edge.to, edgeIndex),
                   fill: 'none',
                   stroke: selected ? '#b42318' : stroke[edge.kind],
                   strokeWidth: selected ? 2.6 : edge.kind === 'collaboration' ? 1.2 : 1.8,
@@ -680,15 +680,16 @@ window.__ModuleLoader__.load({
                   onClick: (event) => { event.stopPropagation(); onSelectEdge(edge) },
                 })
               })),
-            edges.filter((edge) => edge.kind !== 'collaboration' && positions[edge.from] !== undefined && positions[edge.to] !== undefined).map((edge) => {
+            edges.filter((edge) => edge.kind !== 'collaboration' && positions[edge.from] !== undefined && positions[edge.to] !== undefined).map((edge, labelIndex) => {
               const a = positions[edge.from]
               const b = positions[edge.to]
               // Sit the chip on the vertical run of the orthogonal route, which is
               // always between the two columns and therefore clear of node bodies.
               const box = bounds()
               const down = (b.y + NODE_H / 2) >= (a.y + NODE_H / 2)
+              const offset = 40 + (labelIndex % 6) * 26
               const left = (a.x + b.x) / 2 + NODE_W / 2
-              const top = down ? box.bottom + 34 : box.top - 34
+              const top = down ? box.bottom + offset - 14 : box.top - offset + 14
               return h('button', {
                 key: 'label:' + edge.id,
                 type: 'button',

@@ -251,10 +251,537 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------ workbench
 
+    // ------------------------------------------------------------ v1.1 shell
+
+    /** Role accent colours used by canvas nodes and the left rail. */
+    const ROLE_COLOR = {
+      pm: '#7a5af8',
+      developer: '#175cd3',
+      reviewer: '#b54708',
+      qa: '#0e7490',
+    }
+
+    /** Accent for a role, falling back to a neutral tone for custom roles. */
+    const roleColor = (role) => ROLE_COLOR[role] ?? '#475467'
+
+    /** Short label for one liveness value. */
+    const LIVENESS = { running: '执行中', online: '在线', cold: '冷会话', missing: '缺失' }
+
+    /** Format an epoch millisecond timestamp as a compact time. */
+    const clock = (value) => {
+      if (value === null || value === undefined) return '—'
+      const date = new Date(Number(value))
+      if (Number.isNaN(date.getTime())) return '—'
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+
+    /** "3 分钟前" style relative time. */
+    const ago = (value) => {
+      if (value === null || value === undefined) return '—'
+      const diff = Date.now() - Number(value)
+      if (diff < 60_000) return '刚刚'
+      if (diff < 3_600_000) return Math.round(diff / 60_000) + ' 分钟前'
+      if (diff < 86_400_000) return Math.round(diff / 3_600_000) + ' 小时前'
+      return Math.round(diff / 86_400_000) + ' 天前'
+    }
+
+    /** One-line summary of an edge for the inspector. */
+    const edgeKindLabel = { collaboration: '协作', communication: '通信', handoff: '交接' }
+
+    /**
+     * Left rail: project switcher plus the live team of the selected project.
+     * Selecting a Bot opens it in the inspector; it never creates a Session.
+     */
+    function LeftRail({ projects, selected, onSelectProject, teams, selectedBotId, onSelectBot, onManage }) {
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, height: '100%', overflow: 'auto', paddingRight: 4 } },
+        h('div', { style: { display: 'grid', gap: 4 } },
+          h('div', { style: { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: T.muted } }, '项目'),
+          projects.length === 0
+            ? h('div', { style: S.muted }, '尚无项目')
+            : projects.map((project) => h('button', {
+                key: project.id,
+                type: 'button',
+                onClick: () => onSelectProject(project.id),
+                style: {
+                  textAlign: 'left',
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  border: '1px solid ' + (project.id === selected ? T.accent : 'transparent'),
+                  background: project.id === selected ? 'rgba(37,99,235,.10)' : 'transparent',
+                  color: project.id === selected ? T.accent : T.text,
+                  font: 'inherit',
+                  fontSize: 12.5,
+                  cursor: 'pointer',
+                },
+              }, project.name))),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+          h('div', { style: { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: T.muted, flex: 1 } }, '团队'),
+          h(Button, { onClick: onManage }, '管理')),
+        teams.length === 0
+          ? h('div', { style: S.muted }, '尚无 Bot')
+          : teams.map((bot) => {
+              const active = bot.id === selectedBotId
+              const live = bot.liveness?.state ?? 'missing'
+              return h('button', {
+                key: bot.id,
+                type: 'button',
+                onClick: () => onSelectBot(bot.id),
+                style: {
+                  display: 'grid',
+                  gap: 2,
+                  textAlign: 'left',
+                  padding: '7px 8px',
+                  borderRadius: 9,
+                  border: '1px solid ' + (active ? T.accent : T.border),
+                  background: active ? 'rgba(37,99,235,.08)' : 'transparent',
+                  color: T.text,
+                  font: 'inherit',
+                  cursor: 'pointer',
+                },
+              },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                  h('span', { style: { width: 7, height: 7, borderRadius: 999, background: roleColor(bot.role), flex: 'none' } }),
+                  h('span', { style: { fontSize: 12.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' } }, bot.label || bot.role),
+                  h('span', { style: { flex: 1 } }),
+                  h('span', { style: { fontSize: 10.5, color: live === 'missing' ? '#b42318' : T.muted } }, LIVENESS[live] ?? live)),
+                h('div', { style: { fontSize: 11, color: T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  bot.currentTask === null ? '空闲' : bot.currentTask.id + ' ' + bot.currentTask.title))
+            }),
+      )
+    }
+
+    /**
+     * Dependency-free flow canvas: HTML nodes over an SVG edge layer.
+     *
+     * React Flow is not available to a plugin Client module (its `require` only
+     * resolves the module table), so the interaction model is implemented here:
+     * drag nodes, wheel zoom, drag background to pan, fit to view, and persist
+     * positions through `canvas.save`. Nodes are real Bots; edges are the three
+     * kinds the Host projects from real rows.
+     */
+    function CanvasView({ canvas, canvasWindow, onWindow, selectedBotId, onSelectBot, onSelectEdge, selectedEdgeId, onSaveLayout, busy }) {
+      const [show, setShow] = useState({ collaboration: true, communication: true, handoff: true })
+      const [positions, setPositions] = useState({})
+      const [view, setView] = useState({ x: 0, y: 0, zoom: 1 })
+      const [drag, setDrag] = useState(null)
+      const [pan, setPan] = useState(null)
+      const surface = useRef(null)
+      const nodes = canvas?.nodes ?? []
+      const edges = (canvas?.edges ?? []).filter((edge) => show[edge.kind] !== false)
+      const nodeById = useMemo(() => Object.fromEntries(nodes.map((node) => [node.botId, node])), [nodes])
+      const NODE_W = 208
+      const NODE_H = 92
+
+      // Seed positions once per project: saved coordinates win, new Bots get a grid slot.
+      useEffect(() => {
+        if (canvas === null || canvas === undefined) return
+        const saved = new Map((canvas.layout?.nodes ?? []).map((node) => [node.botId, node]))
+        /** @type {Record<string, {x: number, y: number}>} */
+        const next = {}
+        nodes.forEach((node, index) => {
+          const hit = saved.get(node.botId)
+          if (hit !== undefined) {
+            next[node.botId] = { x: hit.x, y: hit.y }
+            return
+          }
+          const columns = Math.max(2, Math.ceil(Math.sqrt(nodes.length)))
+          next[node.botId] = {
+            x: 80 + (index % columns) * (NODE_W + 80),
+            y: 80 + Math.floor(index / columns) * (NODE_H + 110),
+          }
+        })
+        setPositions((current) => (Object.keys(current).length === 0 ? next : { ...next, ...current }))
+        if (canvas.layout?.view !== undefined && canvas.layout.view !== null) {
+          const saved = canvas.layout.view
+          setView((current) => (current.x === 0 && current.y === 0 && current.zoom === 1 ? { x: saved.x, y: saved.y, zoom: saved.zoom } : current))
+        }
+      }, [canvas?.project?.id, nodes.length])
+
+      const persist = useCallback((nextPositions, nextView) => {
+        const payload = {
+          nodes: Object.entries(nextPositions).map(([botId, point]) => ({ botId, x: point.x, y: point.y })),
+          view: nextView,
+        }
+        onSaveLayout(payload)
+      }, [onSaveLayout])
+
+      const toLocal = (event) => {
+        const rect = surface.current?.getBoundingClientRect()
+        return {
+          x: event.clientX - (rect?.left ?? 0),
+          y: event.clientY - (rect?.top ?? 0),
+        }
+      }
+
+      const onWheel = (event) => {
+        event.preventDefault()
+        const point = toLocal(event)
+        setView((current) => {
+          const nextZoom = Math.max(0.3, Math.min(2.5, current.zoom * (event.deltaY > 0 ? 0.9 : 1.1)))
+          const ratio = nextZoom / current.zoom
+          const next = {
+            zoom: nextZoom,
+            x: point.x - (point.x - current.x) * ratio,
+            y: point.y - (point.y - current.y) * ratio,
+          }
+          return next
+        })
+      }
+
+      const fit = () => {
+        if (nodes.length === 0) return
+        const rect = surface.current?.getBoundingClientRect()
+        const width = rect?.width ?? 800
+        const height = rect?.height ?? 520
+        const xs = nodes.map((node) => (positions[node.botId]?.x ?? 0))
+        const ys = nodes.map((node) => (positions[node.botId]?.y ?? 0))
+        const minX = Math.min(...xs)
+        const minY = Math.min(...ys)
+        const maxX = Math.max(...xs) + NODE_W
+        const maxY = Math.max(...ys) + NODE_H
+        const zoom = Math.max(0.3, Math.min(1.4, Math.min((width - 80) / Math.max(200, maxX - minX), (height - 80) / Math.max(160, maxY - minY))))
+        const next = { zoom, x: (width - (maxX - minX) * zoom) / 2 - minX * zoom, y: (height - (maxY - minY) * zoom) / 2 - minY * zoom }
+        setView(next)
+        persist(positions, next)
+      }
+
+      const onNodePointerDown = (event, node) => {
+        event.stopPropagation()
+        onSelectBot(node.botId)
+        const point = toLocal(event)
+        const current = positions[node.botId] ?? { x: 0, y: 0 }
+        setDrag({ botId: node.botId, dx: point.x - (current.x * view.zoom + view.x), dy: point.y - (current.y * view.zoom + view.y) })
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      }
+
+      const onPointerMove = (event) => {
+        const point = toLocal(event)
+        if (drag !== null) {
+          const next = {
+            ...positions,
+            [drag.botId]: { x: Math.round((point.x - view.x - drag.dx) / view.zoom), y: Math.round((point.y - view.y - drag.dy) / view.zoom) },
+          }
+          setPositions(next)
+          return
+        }
+        if (pan !== null) {
+          setView((current) => ({ ...current, x: pan.view.x + (point.x - pan.start.x), y: pan.view.y + (point.y - pan.start.y) }))
+        }
+      }
+
+      const finish = () => {
+        if (drag !== null) {
+          const next = positions
+          setDrag(null)
+          persist(next, view)
+        }
+        if (pan !== null) {
+          setPan(null)
+          persist(positions, view)
+        }
+      }
+
+      const path = (from, to) => {
+        const a = positions[from]
+        const b = positions[to]
+        if (a === undefined || b === undefined) return ''
+        const ax = a.x + NODE_W
+        const ay = a.y + NODE_H / 2
+        const bx = b.x
+        const by = b.y + NODE_H / 2
+        const forward = bx >= ax
+        const c1 = forward ? ax + Math.max(50, (bx - ax) / 2) : ax - 60
+        const c2 = forward ? bx - Math.max(50, (bx - ax) / 2) : bx + 60
+        return 'M ' + ax + ' ' + ay + ' C ' + c1 + ' ' + ay + ', ' + c2 + ' ' + by + ', ' + bx + ' ' + by
+      }
+
+      const stroke = { collaboration: 'rgba(71,84,103,.45)', communication: T.accent, handoff: '#b54708' }
+      const dash = { collaboration: '5 5', communication: '0', handoff: '0' }
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', gap: 8 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('strong', { style: { fontSize: 13 } }, 'Agent Flow'),
+          [['collaboration', '协作关系'], ['communication', '实际通信'], ['handoff', '任务交接']].map(([kind, label]) =>
+            h('label', { key: kind, style: { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: T.muted, cursor: 'pointer' } },
+              h('input', {
+                type: 'checkbox',
+                checked: show[kind] !== false,
+                onChange: (event) => setShow({ ...show, [kind]: event.target.checked }),
+              }),
+              h('span', { style: { width: 14, height: 0, borderTop: '2px ' + (kind === 'collaboration' ? 'dashed' : 'solid') + ' ' + stroke[kind] } }),
+              label)),
+          h('span', { style: S.grow }),
+          h('select', { style: { ...S.input, maxWidth: 150 }, value: canvasWindow, onChange: (event) => onWindow(Number(event.target.value)) },
+            h('option', { value: 60 }, '近 1 小时'),
+            h('option', { value: 1440 }, '近 24 小时'),
+            h('option', { value: 10080 }, '近 7 天')),
+          h(Button, { onClick: fit }, '适配视图'),
+          h(Button, { onClick: () => { const reset = { x: 0, y: 0, zoom: 1 }; setView(reset); persist(positions, reset) } }, '重置'),
+          h('span', { style: { ...S.muted, minWidth: 54, textAlign: 'right' } }, Math.round(view.zoom * 100) + '%'),
+          busy === '' ? null : h('span', { style: S.muted }, '处理中…')),
+        h('div', {
+          ref: surface,
+          onWheel,
+          onPointerDown: (event) => {
+            if (event.button !== 0) return
+            const point = toLocal(event)
+            setPan({ start: point, view })
+            event.currentTarget.setPointerCapture?.(event.pointerId)
+          },
+          onPointerMove,
+          onPointerUp: finish,
+          onPointerLeave: finish,
+          style: {
+            position: 'relative',
+            flex: 1,
+            minHeight: 380,
+            overflow: 'hidden',
+            borderRadius: 12,
+            border: '1px solid ' + T.border,
+            background: 'radial-gradient(circle at 1px 1px, rgba(16,24,40,.10) 1px, transparent 0) 0 0/22px 22px, var(--dsw-bg-panel, transparent)',
+            cursor: drag !== null ? 'grabbing' : pan !== null ? 'grabbing' : 'grab',
+            touchAction: 'none',
+            userSelect: 'none',
+          },
+        },
+          nodes.length === 0
+            ? h('div', { style: { ...S.empty, position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' } }, '还没有 Bot。先在「团队」里生成团队，画布会显示真实节点。')
+            : null,
+          h('div', { style: { position: 'absolute', left: 0, top: 0, transform: 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.zoom + ')', transformOrigin: '0 0', width: 1, height: 1 } },
+            h('svg', { style: { position: 'absolute', left: 0, top: 0, width: 6000, height: 4000, overflow: 'visible', pointerEvents: 'none' } },
+              h('defs', null,
+                Object.entries(stroke).map(([kind, color]) =>
+                  h('marker', {
+                    key: kind,
+                    id: 'pt-arrow-' + kind,
+                    viewBox: '0 0 10 10',
+                    refX: 9,
+                    refY: 5,
+                    markerWidth: 6,
+                    markerHeight: 6,
+                    orient: 'auto-start-reverse',
+                  }, h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color })))),
+              edges.map((edge) => {
+                const selected = edge.id === selectedEdgeId
+                return h('path', {
+                  key: edge.id,
+                  d: path(edge.from, edge.to),
+                  fill: 'none',
+                  stroke: selected ? '#b42318' : stroke[edge.kind],
+                  strokeWidth: selected ? 2.6 : edge.kind === 'collaboration' ? 1.2 : 1.8,
+                  strokeDasharray: dash[edge.kind],
+                  markerEnd: 'url(#pt-arrow-' + edge.kind + ')',
+                  pointerEvents: 'stroke',
+                  style: { cursor: 'pointer' },
+                  onPointerDown: (event) => { event.stopPropagation() },
+                  onClick: (event) => { event.stopPropagation(); onSelectEdge(edge) },
+                })
+              })),
+            edges.filter((edge) => edge.kind !== 'collaboration' && positions[edge.from] !== undefined && positions[edge.to] !== undefined).map((edge) => {
+              const a = positions[edge.from]
+              const b = positions[edge.to]
+              const left = (a.x + NODE_W + b.x) / 2
+              const top = (a.y + b.y + NODE_H) / 2 - 10
+              return h('button', {
+                key: 'label:' + edge.id,
+                type: 'button',
+                onClick: (event) => { event.stopPropagation(); onSelectEdge(edge) },
+                style: {
+                  position: 'absolute',
+                  left,
+                  top,
+                  transform: 'translate(-50%, -50%)',
+                  fontSize: 10.5,
+                  padding: '1px 6px',
+                  borderRadius: 999,
+                  border: '1px solid ' + (edge.id === selectedEdgeId ? '#b42318' : T.border),
+                  background: 'var(--dsw-bg-panel, #fff)',
+                  color: T.muted,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                },
+              }, edgeKindLabel[edge.kind] + ' ×' + edge.count + (edge.lastAt === null ? '' : ' · ' + clock(edge.lastAt)))
+            }),
+            nodes.map((node) => {
+              const point = positions[node.botId] ?? { x: 0, y: 0 }
+              const isSelected = node.botId === selectedBotId
+              return h('div', {
+                key: node.botId,
+                onPointerDown: (event) => onNodePointerDown(event, node),
+                style: {
+                  position: 'absolute',
+                  left: point.x,
+                  top: point.y,
+                  width: NODE_W,
+                  minHeight: NODE_H,
+                  boxSizing: 'border-box',
+                  padding: '9px 10px',
+                  borderRadius: 12,
+                  border: '1px solid ' + (isSelected ? T.accent : T.border),
+                  boxShadow: isSelected ? '0 0 0 3px rgba(37,99,235,.16)' : '0 1px 2px rgba(16,24,40,.06)',
+                  background: 'var(--dsw-bg-panel, #fff)',
+                  display: 'grid',
+                  gap: 3,
+                  cursor: 'grab',
+                },
+              },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                  h('span', { style: { width: 8, height: 8, borderRadius: 999, background: roleColor(node.role), flex: 'none' } }),
+                  h('strong', { style: { fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '.03em' } }, node.label),
+                  h('span', { style: { flex: 1 } }),
+                  h('span', {
+                    style: {
+                      fontSize: 10,
+                      padding: '0 5px',
+                      borderRadius: 999,
+                      color: node.liveness === 'running' ? '#0e7490' : node.liveness === 'online' ? '#05603a' : node.liveness === 'cold' ? '#475467' : '#b42318',
+                      background: 'rgba(16,24,40,.06)',
+                    },
+                  }, LIVENESS[node.liveness] ?? node.liveness)),
+                h('div', { style: { fontSize: 10.5, color: T.muted, fontFamily: T.mono, overflow: 'hidden', textOverflow: 'ellipsis' } }, node.sessionId),
+                h('div', { style: { fontSize: 11.5, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  node.currentTask === null ? '空闲' : node.currentTask.id + ' · ' + node.currentTask.title),
+                node.blocked === null ? null : h('div', { style: { fontSize: 10.5, color: '#b42318' } }, '阻塞：' + String(node.blocked.reason ?? '').slice(0, 40)))
+            })),
+        ),
+      )
+    }
+
+    /** Sessions view: the same independent Sessions, as a table with actions. */
+    function SessionsView({ teams, busy, onOpenInTasks, onWake, onCopy }) {
+      return h('div', { style: { display: 'grid', gap: 10, overflow: 'auto', minHeight: 0 } },
+        h('div', { style: S.card },
+          h('div', { style: S.row },
+            h('strong', { style: { fontSize: 13 } }, '独立 Session'),
+            h('span', { style: S.muted }, teams.length + ' 个 Bot，每个都是独立的 DSH Session（非子代理）')),
+          h(Table, {
+            columns: [
+              { key: 'label', title: 'Bot', render: (row) => h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } }, h('span', { style: { width: 7, height: 7, borderRadius: 999, background: roleColor(row.role) } }), h('strong', { style: { fontSize: 12 } }, row.label || row.role)) },
+              { key: 'session', title: 'Session', render: (row) => h('span', { style: S.code }, row.session_id) },
+              { key: 'preset', title: '预设', render: (row) => row.agent_preset ?? '（默认）' },
+              { key: 'live', title: '状态', render: (row) => h(Badge, { value: row.liveness.state === 'online' || row.liveness.state === 'running' ? 'DONE' : row.liveness.state === 'cold' ? 'INCOMPLETE' : 'FAIL', label: LIVENESS[row.liveness.state] ?? row.liveness.state }) },
+              { key: 'task', title: '当前任务', render: (row) => (row.currentTask === null ? h('span', { style: S.muted }, '空闲') : row.currentTask.id + ' ' + row.currentTask.title) },
+              { key: 'actions', title: '操作', render: (row) => h('div', { style: S.row },
+                h(Button, { onClick: () => onCopy(row.session_id) }, '复制 Session id'),
+                h(Button, { onClick: () => onOpenInTasks(row.currentTask?.id) }, '看任务'),
+                h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onWake(row) }, '发消息')) },
+            ],
+            rows: teams,
+            empty: '尚无 Bot。',
+          })),
+      )
+    }
+
+    /** Right-hand inspector: either one Bot or one edge, summary first. */
+    function Inspector({ bot, edge, messages, tasks, delivery, teams, onClose, onWake, onCopy, onOpenTask, onOpenDelivery, busy }) {
+      if (bot === undefined && edge === undefined) {
+        return h('div', { style: { ...S.card, height: '100%' } },
+          h('strong', { style: { fontSize: 13 } }, '详情'),
+          h('p', { style: S.muted }, '点击画布里的 Bot 节点查看它的真实状态；点击连线查看跨 Session 消息与关联任务。'),
+          h('p', { style: S.muted }, '这里不创建、不替换任何 Session。'))
+      }
+      if (edge !== undefined) {
+        const from = teams.find((row) => row.id === edge.from)
+        const to = teams.find((row) => row.id === edge.to)
+        const related = messages.filter((message) => (message.from_bot_id === edge.from && message.to_bot_id === edge.to) || (message.from_bot_id === edge.to && message.to_bot_id === edge.from))
+        return h('div', { style: { ...S.card, height: '100%', overflow: 'auto' } },
+          h('div', { style: S.row }, h('strong', { style: { fontSize: 13 } }, edgeKindLabel[edge.kind] + '连线'), h('span', { style: S.grow }), h(Button, { onClick: onClose }, '关闭')),
+          h('div', { style: S.muted }, (from?.label ?? edge.from) + ' → ' + (to?.label ?? edge.to)),
+          h('table', { style: S.table }, h('tbody', null,
+            h('tr', null, h('td', { style: S.td }, '消息数'), h('td', { style: S.td }, String(edge.count))),
+            h('tr', null, h('td', { style: S.td }, '最近时间'), h('td', { style: S.td }, edge.lastAt === null ? '—' : when(edge.lastAt) + '（' + ago(edge.lastAt) + '）')),
+            h('tr', null, h('td', { style: S.td }, '最近类型'), h('td', { style: S.td }, String(edge.lastType ?? '—'))),
+            h('tr', null, h('td', { style: S.td }, '状态'), h('td', { style: S.td }, String(edge.state ?? '—'))),
+            h('tr', null, h('td', { style: S.td }, '关联任务'), h('td', { style: S.td }, edge.taskId ?? '—')))),
+          h('strong', { style: { fontSize: 12.5, marginTop: 4 } }, '消息历史'),
+          related.length === 0
+            ? h('p', { style: S.muted }, '（最近 80 条里没有这一对的往返消息）')
+            : related.slice(0, 20).map((message) => h('div', { key: message.id, style: { borderTop: '1px solid ' + T.subtle, padding: '6px 0', display: 'grid', gap: 2 } },
+                h('div', { style: { fontSize: 11, color: T.muted } }, when(message.created_at) + ' · ' + message.type + ' · ' + message.state),
+                h('div', { style: { fontSize: 12 } }, String(message.body).slice(0, 240)))),
+        )
+      }
+      const botTasks = tasks.filter((task) => task.owner_bot_id === bot.id)
+      const inbound = messages.filter((message) => message.to_bot_id === bot.id)
+      const outbound = messages.filter((message) => message.from_bot_id === bot.id)
+      const artifacts = (delivery?.artifacts ?? []).filter((artifact) => botTasks.some((task) => task.id === artifact.task_id)).slice(0, 3)
+      const checks = (delivery?.verification ?? []).filter((check) => botTasks.some((task) => task.id === check.task_id)).slice(0, 3)
+      return h('div', { style: { ...S.card, height: '100%', overflow: 'auto' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', { style: { width: 9, height: 9, borderRadius: 999, background: roleColor(bot.role) } }),
+          h('strong', { style: { fontSize: 14, textTransform: 'uppercase' } }, bot.label || bot.role),
+          h('span', { style: S.grow }),
+          h(Button, { onClick: onClose }, '关闭')),
+        h('div', { style: S.muted }, 'Session · ' + bot.session_id),
+        h('div', { style: S.row },
+          h(Badge, { value: bot.liveness.state === 'online' || bot.liveness.state === 'running' ? 'DONE' : bot.liveness.state === 'cold' ? 'INCOMPLETE' : 'FAIL', label: LIVENESS[bot.liveness.state] ?? bot.liveness.state }),
+          h('span', { style: S.muted }, '预设 ' + (bot.agent_preset ?? '默认')),
+          h('span', { style: S.muted }, '最近活动 ' + ago(bot.last_seen_at))),
+        h('div', { style: S.row },
+          h(Button, { onClick: () => onCopy(bot.session_id) }, '复制 Session id'),
+          h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onWake(bot) }, '发消息')),
+        h('div', { style: { display: 'grid', gap: 6, marginTop: 4 } },
+          h('strong', { style: { fontSize: 12.5 } }, '当前任务'),
+          bot.currentTask === null
+            ? h('span', { style: S.muted }, '空闲')
+            : h('div', { style: { display: 'grid', gap: 4 } },
+                h('div', { style: S.row }, h('span', { style: { fontSize: 12 } }, bot.currentTask.id + ' ' + bot.currentTask.title), h(Badge, { value: bot.currentTask.status })),
+                h(Button, { onClick: () => onOpenTask(bot.currentTask.id) }, '打开任务'))),
+        bot.run === null ? null : h('div', { style: { display: 'grid', gap: 3, marginTop: 4 } },
+          h('strong', { style: { fontSize: 12.5 } }, 'Git 工作区'),
+          h('div', { style: S.code }, bot.run.branch),
+          h('div', { style: { ...S.code, fontSize: 10.5 } }, bot.run.worktree),
+          h('div', { style: S.muted }, '租约至 ' + when(bot.run.leaseUntil) + ' · 令牌 ' + bot.run.tokensUsed)),
+        bot.blocked === null ? null : h('div', { style: { marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(180,35,24,.35)', color: '#b42318', fontSize: 12 } },
+          '阻塞：' + bot.blocked.reason),
+        h('div', { style: { display: 'grid', gap: 3, marginTop: 6 } },
+          h('strong', { style: { fontSize: 12.5 } }, '跨 Session 消息'),
+          h('div', { style: S.muted }, '收到 ' + inbound.length + ' 条 · 发出 ' + outbound.length + ' 条（最近 80 条内）'),
+          inbound.slice(0, 3).map((message) => h('div', { key: message.id, style: { fontSize: 11.5, color: T.muted } }, '← ' + message.type + '：' + String(message.body).slice(0, 60))),
+          outbound.slice(0, 3).map((message) => h('div', { key: message.id, style: { fontSize: 11.5, color: T.muted } }, '→ ' + message.type + '：' + String(message.body).slice(0, 60)))),
+        h('div', { style: { display: 'grid', gap: 3, marginTop: 6 } },
+          h('strong', { style: { fontSize: 12.5 } }, '交付与检查'),
+          artifacts.length === 0 ? h('span', { style: S.muted }, '暂无工件') : artifacts.map((artifact) => h('div', { key: artifact.id, style: { fontSize: 11.5 } }, artifact.id + ' @ ' + String(artifact.repo_commit).slice(0, 10))),
+          checks.length === 0 ? h('span', { style: S.muted }, '暂无检查') : checks.map((check) => h('div', { key: check.id, style: { fontSize: 11.5 } }, check.check_type + ' ' + check.status + '（exit ' + check.exit_code + '）')),
+          h(Button, { onClick: onOpenDelivery }, '打开交付视图')),
+      )
+    }
+
+    /** Compact event strip pinned under the workspace. */
+    function BottomTimeline({ timeline, onOpen }) {
+      const rows = (timeline ?? []).slice(0, 40)
+      return h('div', { style: { borderTop: '1px solid ' + T.border, paddingTop: 6, display: 'grid', gap: 4 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('strong', { style: { fontSize: 12 } }, '事件时间线'),
+          h('span', { style: S.muted }, rows.length + ' 条（任务事件 / 审计 / 消息 / 检查 / 评审 / 审批）'),
+          h('span', { style: S.grow }),
+          h(Button, { onClick: onOpen }, '展开')),
+        rows.length === 0
+          ? h('div', { style: S.muted }, '还没有事件。')
+          : h('div', { style: { display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 } },
+              rows.slice(0, 14).map((row, index) => h('div', {
+                key: (row.kind ?? 'row') + ':' + index,
+                style: {
+                  flex: 'none',
+                  maxWidth: 260,
+                  padding: '4px 8px',
+                  borderRadius: 8,
+                  border: '1px solid ' + T.border,
+                  fontSize: 11.5,
+                  color: T.text,
+                  background: 'var(--dsw-bg-panel, transparent)',
+                },
+              },
+                h('div', { style: { color: T.muted, fontSize: 10.5 } }, clock(row.at) + ' · ' + row.kind),
+                h('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, String(row.summary ?? '')))))
+      )
+    }
+
     function Workbench({ compact }) {
       const [projects, setProjects] = useState([])
       const [projectId, setProjectId] = useState('')
-      const [tab, setTab] = useState('overview')
+      const [view, setView] = useState('canvas')
+      const [more, setMore] = useState('')
       const [status, setStatus] = useState(null)
       const [overview, setOverview] = useState(null)
       const [teams, setTeams] = useState([])
@@ -272,12 +799,19 @@ window.__ModuleLoader__.load({
       const [metrics, setMetrics] = useState(null)
       const [projectTemplates, setProjectTemplates] = useState([])
       const [timeline, setTimeline] = useState([])
+      const [canvas, setCanvas] = useState(null)
+      const [canvasWindow, setCanvasWindow] = useState(1440)
+      const [selectedBotId, setSelectedBotId] = useState('')
+      const [selectedEdge, setSelectedEdge] = useState(null)
+      const [edgeMessages, setEdgeMessages] = useState([])
       const mounted = useRef(true)
 
       useEffect(() => () => { mounted.current = false }, [])
 
-      const guard = useCallback(async (label, operation) => {
-        setBusy(label)
+      const guard = useCallback(async (label, operation, silent = false) => {
+        // Background refreshes must not flip the toolbar into "处理中…": only a
+        // user-triggered action owns the busy state.
+        if (!silent) setBusy(label)
         setError('')
         setNotice('')
         try {
@@ -286,7 +820,7 @@ window.__ModuleLoader__.load({
           setError(String(failure?.message ?? failure))
           return undefined
         } finally {
-          if (mounted.current) setBusy('')
+          if (!silent && mounted.current) setBusy('')
         }
       }, [])
 
@@ -294,16 +828,14 @@ window.__ModuleLoader__.load({
         const list = await guard('projects', () => call('projects.list'))
         if (list === undefined) return
         setProjects(list)
-        // Templates change rarely; refresh them together with the project list so a
-        // newly published template shows up without a reload.
         void call('projectTemplates.list').then((rows) => { if (mounted.current) setProjectTemplates(rows) }).catch(() => {})
         if (projectId === '' && list.length > 0) setProjectId(list[0].id)
       }, [guard, projectId])
 
-      const refreshProject = useCallback(async () => {
+      const refreshProject = useCallback(async (silent = false) => {
         if (projectId === '') return
         await guard('project', async () => {
-          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets, nextMetrics, nextTimeline] = await Promise.all([
+          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets, nextMetrics, nextTimeline, nextCanvas] = await Promise.all([
             call('overview.get', { projectId }),
             call('team.list', { projectId }),
             call('tasks.list', { projectId }),
@@ -314,6 +846,7 @@ window.__ModuleLoader__.load({
             call('budgets.get', { projectId }).catch(() => null),
             call('dashboard.get', { projectId }).catch(() => null),
             call('timeline.get', { projectId, limit: 200 }).catch(() => []),
+            call('canvas.get', { projectId, sinceMinutes: canvasWindow }).catch(() => null),
           ])
           if (!mounted.current) return
           setOverview(nextOverview)
@@ -326,18 +859,16 @@ window.__ModuleLoader__.load({
           setBudgets({ projectId, budgets: nextBudgets })
           setMetrics(nextMetrics)
           setTimeline(Array.isArray(nextTimeline) ? nextTimeline : [])
-        })
-      }, [guard, projectId])
+          setCanvas(nextCanvas)
+        }, silent)
+      }, [guard, projectId, canvasWindow])
 
       useEffect(() => { void refreshProjects() }, [refreshProjects])
       useEffect(() => { void refreshProject() }, [refreshProject])
 
-      // Live status: the workbench reflects Host state rather than a snapshot
-      // taken once at mount. Polling keeps a Bot's progress visible without a
-      // second transport.
       useEffect(() => {
         if (projectId === '') return undefined
-        const timer = setInterval(() => { void refreshProject() }, 5_000)
+        const timer = setInterval(() => { void refreshProject(true) }, 5_000)
         return () => clearInterval(timer)
       }, [projectId, refreshProject])
 
@@ -349,13 +880,14 @@ window.__ModuleLoader__.load({
       }, [guard])
 
       const selected = projects.find((project) => project.id === projectId)
-
-      // Budgets of the selected project, refreshed with the rest of the view.
       const budgets = budgetsState.budgets
+      const selectedBot = selectedEdge === null ? teams.find((bot) => bot.id === selectedBotId) : undefined
+      const selectedEdgeValue = selectedEdge ?? undefined
 
       const openTask = useCallback(async (taskId) => {
         setExpandedTask(taskId)
         setTaskDetail(null)
+        setMore('tasks')
         await guard('task', async () => {
           const detail = await call('tasks.get', { taskId })
           if (mounted.current) setTaskDetail(detail)
@@ -372,114 +904,180 @@ window.__ModuleLoader__.load({
         return result
       }, [guard, refreshProject, refreshProjects])
 
-      // -------------------------------------------------------- sub-views
+      const copy = useCallback((text) => {
+        void navigator.clipboard?.writeText(text)
+        setNotice('已复制：' + String(text).slice(0, 40))
+      }, [])
 
-      const ProjectsTab = h(ProjectsPanel, {
+      const selectEdge = useCallback(async (edge) => {
+        setSelectedEdge(edge)
+        setEdgeMessages([])
+        await guard('edge', async () => {
+          const rows = await call('messages.list', { projectId, between: [edge.from, edge.to], limit: 50 })
+          if (mounted.current) setEdgeMessages(Array.isArray(rows) ? rows : [])
+        })
+      }, [guard, projectId])
+
+      const saveLayout = useCallback((payload) => {
+        void call('canvas.save', { projectId, ...payload }).catch((failure) => setError(String(failure?.message ?? failure)))
+      }, [projectId])
+
+      const wake = useCallback(async (bot) => {
+        const text = window.prompt('给 ' + (bot.label || bot.role) + ' 发一条消息（会写入它的 Session）：', '')
+        if (text === null || text.trim() === '') return
+        await act('wake', () => call('team.wake', { projectId, botId: bot.id, text }), '消息已投递给 ' + (bot.label || bot.role))
+      }, [act, projectId])
+
+      // -------------------------------------------------------- panels
+
+      const ProjectsPanelNode = h(ProjectsPanel, {
         projects, templates: projectTemplates, selected, onSelect: setProjectId, busy, act,
         onCreate: (input) => act('create-project', () => call('projects.create', input), '项目已创建，下一步生成团队。'),
         onArchive: (id) => act('archive', () => call('projects.archive', { projectId: id }), '项目已归档'),
         onPause: (id, paused) => act('pause', () => call('projects.pause', { projectId: id, paused }), paused ? '项目已暂停' : '项目已恢复'),
         onRestore: (id) => act('restore', () => call('projects.restore', { projectId: id }), '项目已从归档恢复'),
       })
-
-      const OverviewTab = h(OverviewPanel, { project: selected, overview, activity, onDecide: () => setTab('decisions') })
-
-      const TeamTab = h(TeamPanel, {
+      const OverviewPanelNode = h(OverviewPanel, { project: selected, overview, activity, onDecide: () => setMore('decisions') })
+      const TeamPanelNode = h(TeamPanel, {
         project: selected, teams, busy,
-        onGenerate: (roles) => act('team', () => call('team.create', { projectId, roles, presets: {} }), `团队已创建：${roles.length} 个独立 Session`),
+        onGenerate: (roles) => act('team', () => call('team.create', { projectId, roles, presets: {} }), '团队已创建：' + roles.length + ' 个独立 Session'),
         onRebind: (botId, sessionId) => act('rebind', () => call('team.rebind', { projectId, botId, sessionId }), 'Session 已重新绑定'),
       })
-
-      const TasksTab = h(TasksPanel, {
+      const TasksPanelNode = h(TasksPanel, {
         project: selected, teams, tasks, busy, expandedTask, taskDetail,
         onOpen: openTask,
         onCreate: (input) => act('create-task', () => call('tasks.create', { projectId, ...input }), '任务已创建'),
-        onTransition: (taskId, action, reason) => act('transition', () => call('tasks.transition', { taskId, action, reason }), `任务已${ACTION_ZH[action] ?? action}`),
+        onTransition: (taskId, action, reason) => act('transition', () => call('tasks.transition', { taskId, action, reason }), '任务已' + (ACTION_ZH[action] ?? action)),
         onAssign: (taskId, botId, expectedVersion) => act('assign', () => call('tasks.assign', { taskId, botId, expectedVersion }), '任务已分配'),
         onVerify: (taskId) => act('verify', () => call('tasks.verify', { taskId }), '检查已执行'),
         onUpdate: (taskId, patch) => act('task-edit', () => call('tasks.update', { taskId, ...patch }), '任务已更新'),
       })
-
-      const MessagesTab = h(MessagesPanel, {
+      const MessagesPanelNode = h(MessagesPanel, {
         messages, busy,
         onBroadcast: (channel, body) => act('broadcast', () => call('messages.broadcast', { projectId, channel, body }), '已广播到频道'),
         onReplay: (messageId) => act('replay', () => call('messages.replay', { messageId }), '消息已重新入队'),
       })
-
-      const DeliveryTab = h(DeliveryPanel, {
-        delivery,
-        tasks,
+      const DeliveryPanelNode = h(DeliveryPanel, {
+        delivery, tasks,
         onVerifyArtifacts: () => guard('verify-artifacts', () => call('delivery.verify', { projectId })),
       })
-
-      const DecisionsTab = h(DecisionsPanel, {
+      const DecisionsPanelNode = h(DecisionsPanel, {
         decisions, busy,
         onDecideChange: (changeId, decision, justification) => act('change', () => call('decisions.decideChange', { changeId, decision, justification }), decision === 'APPROVE' ? '提案已批准' : '提案已拒绝'),
         onApproveTask: (taskId, decision, headCommit, justification) => act('approve', () => call('decisions.approveTask', { taskId, decision, headCommit, justification }), decision === 'APPROVE' ? '审批已记录（批准）' : '审批已记录（拒绝）'),
         onExecuteMerge: (changeId) => act('merge', () => call('decisions.executeMerge', { changeId }), '合并已执行'),
       })
-
-      const TimelineTab = h(TimelinePanel, { timeline })
-      const QualityTab = h(QualityPanel, { metrics })
-      const SettingsTab = h(SettingsPanel, {
-        status,
-        project: selected,
-        budgets,
-        busy,
-        act,
+      const TimelinePanelNode = h(TimelinePanel, { timeline })
+      const QualityPanelNode = h(QualityPanel, { metrics })
+      const SettingsPanelNode = h(SettingsPanel, {
+        status, project: selected, budgets, busy, act,
         onProbe: refreshProject,
         onSavePolicy: (policy) => act('policy', () => call('projects.update', { projectId, policy }), '策略已保存'),
         onSaveBudgets: (patch) => act('budgets', () => call('budgets.update', { projectId, ...patch }), '预算已保存'),
         onExport: () => call('export.project', { projectId }),
       })
+      const SessionsPanelNode = h(SessionsView, {
+        teams,
+        busy,
+        onOpenInTasks: (taskId) => { if (taskId !== undefined && taskId !== '') void openTask(taskId) },
+        onWake: (bot) => void wake(bot),
+        onCopy: copy,
+      })
 
-      const tabs = [
-        ['overview', '总览'],
+      const primaryViews = [
+        ['overview', 'Overview'],
+        ['canvas', 'Canvas'],
+        ['sessions', 'Sessions'],
+        ['tasks', 'Tasks'],
+        ['deliveries', 'Deliveries'],
+      ]
+      const moreViews = [
+        ['projects', '项目'],
         ['team', '团队'],
-        ['tasks', '任务'],
         ['messages', '消息'],
-        ['delivery', '交付'],
         ['timeline', '时间线'],
         ['quality', '质量'],
-        ['decisions', `决策${decisions !== null && (decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length) > 0 ? ` (${decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length})` : ''}`],
-        ['projects', '项目'],
+        ['decisions', '决策' + (decisions === null ? '' : ' (' + (decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length) + ')')],
         ['settings', '设置'],
       ]
+      const panelFor = {
+        overview: OverviewPanelNode,
+        tasks: TasksPanelNode,
+        deliveries: DeliveryPanelNode,
+      }
+      const morePanelFor = {
+        projects: ProjectsPanelNode,
+        team: TeamPanelNode,
+        messages: MessagesPanelNode,
+        timeline: TimelinePanelNode,
+        quality: QualityPanelNode,
+        decisions: DecisionsPanelNode,
+        settings: SettingsPanelNode,
+      }
 
-      const body = {
-        overview: OverviewTab,
-        team: TeamTab,
-        tasks: TasksTab,
-        messages: MessagesTab,
-        delivery: DeliveryTab,
-        timeline: TimelineTab,
-        quality: QualityTab,
-        decisions: DecisionsTab,
-        projects: ProjectsTab,
-        settings: SettingsTab,
-      }[tab]
+      const main = view === 'canvas'
+        ? h(CanvasView, {
+            canvas,
+            canvasWindow,
+            onWindow: (value) => setCanvasWindow(value),
+            selectedBotId: selectedBot?.id ?? '',
+            onSelectBot: (botId) => { setSelectedEdge(null); setSelectedBotId(botId) },
+            onSelectEdge: (edge) => { setSelectedBotId(''); void selectEdge(edge) },
+            selectedEdgeId: selectedEdge?.id ?? '',
+            onSaveLayout: saveLayout,
+            busy,
+          })
+        : view === 'sessions' ? SessionsPanelNode : (panelFor[view] ?? OverviewPanelNode)
 
-      return h('div', { style: { ...S.page, height: compact ? undefined : '100%' } },
-        h('div', { style: S.header },
-          h('h3', { style: S.title }, '项目团队 Project Teams'),
+      return h('div', { style: { ...S.page, height: compact ? undefined : '100%', gap: 8 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: S.title }, 'Project Teams'),
           h('select', {
-            style: { ...S.input, minWidth: 190 },
+            style: { ...S.input, minWidth: 180 },
             value: projectId,
-            onChange: (event) => { setProjectId(event.target.value); setTab('overview') },
+            onChange: (event) => { setProjectId(event.target.value); setSelectedBotId(''); setSelectedEdge(null) },
           },
             projects.length === 0 ? h('option', { value: '' }, '尚无项目') : null,
-            projects.map((project) => h('option', { key: project.id, value: project.id }, `${project.name}${project.status === 'active' ? '' : ` · ${STATUS_LABEL[project.status.toUpperCase()] ?? project.status}`}`))),
+            projects.map((project) => h('option', { key: project.id, value: project.id }, project.name))),
           selected === undefined ? null : h(Badge, { value: selected.status === 'active' ? 'DONE' : 'CANCELLED', label: STATUS_LABEL[selected.status.toUpperCase()] ?? selected.status }),
-          selected === undefined ? null : h(Badge, { value: selected.counts.pendingDecisions > 0 ? 'NEEDS_HUMAN' : 'PASS', label: `待决策 ${selected.counts.pendingDecisions} 项` }),
+          h('span', { style: S.muted }, (canvas?.nodes?.length ?? teams.length) + ' Session'),
+          h('span', { style: S.muted }, '待审批 ' + (selected?.counts?.pendingDecisions ?? 0)),
           h('span', { style: S.grow }),
-          h(Button, { onClick: () => { void refreshProjects(); void refreshProject() }, disabled: busy !== '' }, busy === '' ? '刷新' : '处理中…'),
-        ),
-        error === '' ? null : h('div', { style: { ...S.muted, color: '#b42318', border: '1px solid rgba(180,35,24,.35)', borderRadius: 8, padding: '6px 9px' } }, error),
-        notice === '' ? null : h('div', { style: { ...S.muted, color: '#05603a', border: '1px solid rgba(5,96,58,.35)', borderRadius: 8, padding: '6px 9px' } }, notice),
-        h('div', { style: S.tabs }, tabs.map(([key, label]) => h('button', {
-          key, type: 'button', style: S.tab(tab === key), onClick: () => setTab(key),
-        }, label))),
-        h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }, body),
+          h('div', { style: S.row },
+            primaryViews.map(([key, label]) => h('button', {
+              key, type: 'button', style: S.tab(view === key && more === ''), onClick: () => { setView(key); setMore('') },
+            }, label))),
+          h(Button, { onClick: () => { void refreshProjects(); void refreshProject() }, disabled: busy !== '' }, busy === '' ? '刷新' : '处理中…')),
+        h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+          moreViews.map(([key, label]) => h('button', {
+            key, type: 'button', style: S.tab(more === key), onClick: () => setMore(more === key ? '' : key),
+          }, label))),
+        error === '' ? null : h('div', { style: { ...S.muted, color: '#b42318', border: '1px solid rgba(180,35,24,.35)', borderRadius: 8, padding: '5px 9px' } }, error),
+        notice === '' ? null : h('div', { style: { ...S.muted, color: '#05603a', border: '1px solid rgba(5,96,58,.35)', borderRadius: 8, padding: '5px 9px' } }, notice),
+        h('div', { style: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '220px minmax(320px, 1fr) 320px', gap: 10 } },
+          h('div', { style: { minHeight: 0, borderRight: '1px solid ' + T.border, paddingRight: 8 } },
+            h(LeftRail, {
+              projects, selected: projectId, onSelectProject: (id) => { setProjectId(id); setSelectedBotId(''); setSelectedEdge(null) },
+              teams, selectedBotId, onSelectBot: (botId) => { setSelectedEdge(null); setSelectedBotId(botId); setView('canvas') },
+              onManage: () => { setView('sessions'); setMore('') },
+            })),
+          h('div', { style: { minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 } },
+            more === ''
+              ? main
+              : h('div', { style: { minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' } }, morePanelFor[more] ?? null)),
+          h('div', { style: { minHeight: 0 } },
+            h(Inspector, {
+              bot: selectedBot,
+              edge: selectedEdgeValue,
+              messages: selectedEdge === null ? messages : edgeMessages,
+              tasks, delivery, teams, busy,
+              onClose: () => { setSelectedBotId(''); setSelectedEdge(null) },
+              onWake: (bot) => void wake(bot),
+              onCopy: copy,
+              onOpenTask: (taskId) => void openTask(taskId),
+              onOpenDelivery: () => { setView('deliveries'); setMore('') },
+            }))),
+        h(BottomTimeline, { timeline, onOpen: () => setMore('timeline') }),
       )
     }
 

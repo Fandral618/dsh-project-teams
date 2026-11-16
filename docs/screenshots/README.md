@@ -14,6 +14,7 @@ Two kinds of evidence live here, because the desktop window could not always be 
 | `06-decisions.png` | 决策 |
 | `07-settings.png` | 设置 |
 | `08-workbench-tabs.png` | 标签行，显示新增的 **时间线** 与 **质量** |
+| `10-workspace.png` | v1.1 工作台：左项目/团队、画布（真实节点与连线）、右 Inspector、底部时间线 |
 
 Method: the window bitmap was captured with `PrintWindow` (the RDP session's screen DC was
 invalid, so `CopyFromScreen` fails), and tabs were switched with UI Automation

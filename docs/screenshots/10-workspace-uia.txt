@@ -1,0 +1,149 @@
+DeepSeek Harness
+最小化
+恢复
+关闭
+DeepSeek Harness
+新建会话
+收起侧边栏
+新建会话
+全局面板
+搜索
+从侧边栏取消固定搜索
+插件
+自动化任务
+从侧边栏取消固定自动化任务
+项目团队
+从侧边栏取消固定项目团队
+更多
+工作区
+搜索会话
+搜索会话名称
+按日期排列
+视图选项
+添加工作区
+会话
+DSH-Bot
+进行中 Project Teams DSH 插件开发 M0 验证 16分钟
+Trade
+进行中 评审专家 18分钟
+开发工程师 16分钟
+0.7-rust
+进行中 1 个子智能体运行中 0.7开发工程师 15分钟
+0.7 评审专家 3小时
+0.6-dev
+未分组
+PT · 演示·账号系统 · PM 4小时
+PT · 演示·账号系统 · REVIEWER 4小时
+PT · 演示·账号系统 · QA 4小时
+PT · 演示·账号系统 · DEVELOPER 4小时
+PT M0 · Session B (Reviewer role) 5小时
+展开其余 2 个会话
+账号菜单
+Project Teams
+进行中
+4 Session
+待审批 2
+Overview
+Canvas
+Sessions
+Tasks
+Deliveries
+处理中…
+项目
+团队
+消息
+时间线
+质量
+决策 (2)
+设置
+项目
+演示·账号系统
+团队
+管理
+DEVELOPER 冷会话 空闲
+PM 冷会话 空闲
+QA 冷会话 空闲
+REVIEWER 冷会话 空闲
+Agent Flow
+协作关系
+协作关系
+实际通信
+实际通信
+任务交接
+任务交接
+适配视图
+重置
+100%
+处理中…
+通信 ×5 · 15:25
+交接 ×1 · 15:25
+通信 ×7 · 15:28
+交接 ×1 · 15:28
+通信 ×2 · 15:26
+交接 ×2 · 15:26
+通信 ×7 · 15:34
+交接 ×2 · 15:34
+通信 ×2 · 15:24
+交接 ×1 · 15:24
+通信 ×2 · 15:24
+交接 ×1 · 15:24
+通信 ×5 · 15:28
+交接 ×1 · 15:28
+通信 ×9 · 15:36
+通信 ×10 · 15:37
+交接 ×2 · 15:37
+通信 ×9 · 15:37
+DEVELOPER
+冷会话
+session-2398a071-8472-4906-b1f3-3d7793e05551
+空闲
+PM
+冷会话
+session-c2faa621-93b9-45fc-946b-ecb00e7710c0
+空闲
+QA
+冷会话
+session-fdeca47f-068b-46a7-a7f3-51c9f717d240
+空闲
+REVIEWER
+冷会话
+session-e50df852-1fcb-4f04-9cd7-268250a13068
+空闲
+详情
+点击画布里的 Bot 节点查看它的真实状态；点击连线查看跨 Session 消息与关联任务。
+这里不创建、不替换任何 Session。
+事件时间线
+40 条（任务事件 / 审计 / 消息 / 检查 / 评审 / 审批）
+展开
+16:37 · audit
+project.export prj_6c6b4ca69a73 [ok]
+16:37 · audit
+budget.write prj_6c6b4ca69a73 [ok]
+16:37 · task-event
+edit DRAFT → DRAFT
+16:37 · audit
+task.edit T-2 [ok]
+16:37 · audit
+artifact.verify prj_6c6b4ca69a73 [ok]
+15:39 · audit
+message.ack msg_5728d6cf85fe4914 [ok]
+15:39 · audit
+task.claim prj_6c6b4ca69a73 [denied]
+15:39 · audit
+message.ack msg_df63e0b6f2a9478e [ok]
+15:38 · audit
+message.ack msg_997736d661ee4d2a [ok]
+15:38 · audit
+message.ack msg_949a2537778c435d [ok]
+15:38 · audit
+message.ack msg_5728d6cf85fe4914 [ok]
+15:38 · audit
+message.ack msg_f7561628826e41fd [ok]
+15:38 · audit
+message.ack msg_7c5083e6d97a4a49 [ok]
+15:37 · audit
+message.ack msg_61b486962e6a44f8 [ok]
+手动标记为未读
+应用菜单
+应用
+编辑

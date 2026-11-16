@@ -544,36 +544,46 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * Orthogonal route with rounded corners: right edge of the source, a
-       * horizontal run, a vertical run, then into the left edge of the target.
-       * Straight beziers crossed node bodies, which made the graph hard to read.
+       * Band routing: exit the source box from its top (or bottom) edge, run along a
+       * horizontal band outside every box, then drop into the target from the same
+       * side. The old lane routing still crossed node bodies whenever the horizontal
+       * run shared a row with another box.
        */
-      const path = (from, to) => {
+      const bounds = () => {
+        const list = Object.values(positions)
+        if (list.length === 0) return { top: 0, bottom: NODE_H, left: 0, right: NODE_W }
+        return {
+          top: Math.min(...list.map((point) => point.y)),
+          bottom: Math.max(...list.map((point) => point.y)) + NODE_H,
+          left: Math.min(...list.map((point) => point.x)),
+          right: Math.max(...list.map((point) => point.x)) + NODE_W,
+        }
+      }
+
+      const path = (from, to, index = 0) => {
         const a = positions[from]
         const b = positions[to]
         if (a === undefined || b === undefined) return ''
-        const ax = a.x + NODE_W
-        const ay = a.y + NODE_H / 2
-        const bx = b.x
-        const by = b.y + NODE_H / 2
-        const radius = 8
-        const dir = by > ay ? 1 : -1
-        const gap = 26
-        // Lane: clear of both boxes. Forward edges use the midpoint between the
-        // columns; backward edges go around the right side of both boxes.
-        const forward = bx > ax + gap
-        const lane = forward
-          ? Math.round((ax + bx) / 2)
-          : Math.max(ax, bx) + NODE_W + gap
-        if (Math.abs(by - ay) < 2) return 'M ' + ax + ' ' + ay + ' L ' + bx + ' ' + by
-        const fromX = forward ? lane : ax + NODE_W * 0 + gap
+        const box = bounds()
+        const ax = a.x + NODE_W / 2
+        const bx = b.x + NODE_W / 2
+        const ayCentre = a.y + NODE_H / 2
+        const byCentre = b.y + NODE_H / 2
+        const down = byCentre >= ayCentre
+        // Stagger parallel edges so two links between different pairs stay readable.
+        const offset = 34 + (index % 4) * 16
+        const band = down ? box.bottom + offset : box.top - offset
+        const startY = down ? a.y + NODE_H : a.y
+        const endY = down ? b.y + NODE_H : b.y
+        const radius = 10
+        const dir = down ? 1 : -1
         return [
-          'M ' + ax + ' ' + ay,
-          'L ' + (fromX - radius * Math.sign(fromX - ax || 1)) + ' ' + ay,
-          'Q ' + fromX + ' ' + ay + ', ' + fromX + ' ' + (ay + radius * dir),
-          'L ' + fromX + ' ' + (by - radius * dir),
-          'Q ' + fromX + ' ' + by + ', ' + (fromX + radius * Math.sign(bx - fromX || 1)) + ' ' + by,
-          'L ' + bx + ' ' + by,
+          'M ' + ax + ' ' + startY,
+          'L ' + ax + ' ' + (band - radius * dir),
+          'Q ' + ax + ' ' + band + ', ' + (ax + radius * Math.sign(bx - ax || 1)) + ' ' + band,
+          'L ' + (bx - radius * Math.sign(bx - ax || 1)) + ' ' + band,
+          'Q ' + bx + ' ' + band + ', ' + bx + ' ' + (band + radius * dir),
+          'L ' + bx + ' ' + endY,
         ].join(' ')
       }
 
@@ -598,6 +608,15 @@ window.__ModuleLoader__.load({
             h('option', { value: 1440 }, '近 24 小时'),
             h('option', { value: 10080 }, '近 7 天')),
           h(Button, { onClick: fit }, '适配视图'),
+          h(Button, {
+            onClick: () => {
+              const next = {}
+              nodes.forEach((node, index) => { next[node.botId] = { x: 80 + index * 260, y: 120 } })
+              setPositions(next)
+              persist(next, { x: 0, y: 0, zoom: 1 })
+              setView({ x: 0, y: 0, zoom: 1 })
+            },
+          }, '自动排布'),
           h(Button, { onClick: () => { const reset = { x: 0, y: 0, zoom: 1 }; setView(reset); persist(positions, reset) } }, '重置'),
           h('span', { style: { ...S.muted, minWidth: 54, textAlign: 'right' } }, Math.round(view.zoom * 100) + '%'),
           busy === '' ? null : h('span', { style: S.muted }, '处理中…')),
@@ -666,13 +685,10 @@ window.__ModuleLoader__.load({
               const b = positions[edge.to]
               // Sit the chip on the vertical run of the orthogonal route, which is
               // always between the two columns and therefore clear of node bodies.
-              const ax = a.x + NODE_W
-              const ay = a.y + NODE_H / 2
-              const bx = b.x
-              const by = b.y + NODE_H / 2
-              const run = Math.min(80, Math.max(40, Math.abs(bx - ax) / 3))
-              const left = bx > ax ? ax + run : ax - run
-              const top = (ay + by) / 2
+              const box = bounds()
+              const down = (b.y + NODE_H / 2) >= (a.y + NODE_H / 2)
+              const left = (a.x + b.x) / 2 + NODE_W / 2
+              const top = down ? box.bottom + 34 : box.top - 34
               return h('button', {
                 key: 'label:' + edge.id,
                 type: 'button',

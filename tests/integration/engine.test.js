@@ -21,6 +21,16 @@ import { actorOf, makeEnvironment, makeRepository, seedProject } from '../helper
 const owner = ownerActor()
 
 /**
+ * Build a service-side bot actor for one bot row.
+ * @param {any} env - environment.
+ * @param {Record<string, any>} bot - bot row.
+ * @returns {any} actor.
+ */
+function botActorOf(env, bot) {
+  return { kind: 'bot', id: bot.id, role: bot.role, projectId: bot.project_id, sessionId: bot.session_id, capabilities: env.service.capabilitiesOf(bot) }
+}
+
+/**
  * Advance a fresh task to ASSIGNED with the developer as owner.
  * @param {any} env - environment.
  * @param {any} project - project row.
@@ -283,7 +293,7 @@ test('a reviewer gets no writable worktree (AT-09)', async () => {
     const reviewer = actorOf(bots, 'reviewer')
     const task = await readyTask(env, project, dev)
     // The reviewer cannot claim a developer task and cannot start a run.
-    assert.throws(() => env.service.claimTask(reviewer.actor, task.id, task.version), /VERSION_CONFLICT|claim lost/)
+    assert.throws(() => env.service.claimTask(reviewer.actor, task.id, task.version), /VERSION_CONFLICT|claim lost|may not perform "task.claim"/)
     await assert.rejects(() => env.service.startRun(reviewer.actor, task.id), /writable worktree|perform "run.start"|owns/)
   } finally {
     env.close()
@@ -1025,6 +1035,64 @@ test('one reviewer requesting changes fails a dual-review gate even when the oth
     const gate = env.service.gate(task.id)
     assert.equal(gate.status, 'FAIL')
     assert.notEqual(env.service.task(task.id).status, 'DONE')
+  } finally {
+    env.close()
+  }
+})
+
+// --------------------------------------------------------- project templates
+
+test('a project can start from a template, and explicit fields still win (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const templates = env.service.listProjectTemplates(owner)
+    assert.ok(templates.some((row) => row.name === 'python'))
+    const fromTemplate = await env.service.createProject(owner, {
+      name: 'from-python-template',
+      repoRoot: env.repoRoot,
+      templateId: 'python',
+    })
+    assert.equal(fromTemplate.policy.checks.length, 1)
+    assert.match(fromTemplate.policy.checks[0].command, /pytest/)
+
+    // An explicit policy field overrides the template value.
+    const overridden = await env.service.createProject(owner, {
+      name: 'override-template',
+      repoRoot: env.repoRoot,
+      templateId: 'web-node',
+      policy: { checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }], reviewCount: 2 },
+    })
+    assert.equal(overridden.policy.checks[0].command, 'node -e process.exitCode=0')
+    assert.equal(overridden.policy.reviewCount, 2)
+
+    // An unknown template is refused instead of silently creating an empty policy.
+    await assert.rejects(
+      () => env.service.createProject(owner, { name: 'bad', repoRoot: env.repoRoot, templateId: 'nope' }),
+      /does not exist/,
+    )
+  } finally {
+    env.close()
+  }
+})
+
+test('the owner can publish a project template and a bot cannot (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const created = env.service.upsertProjectTemplate(owner, {
+      name: 'strict',
+      description: 'two reviewers, approval for done',
+      policy: { checks: [{ type: 'test', command: 'npm test', required: true }], reviewCount: 2, requireApprovalForDone: true },
+    })
+    assert.equal(created.name, 'strict')
+    assert.equal(created.policy.reviewCount, 2)
+    assert.throws(() => env.service.upsertProjectTemplate(dev.actor, { name: 'x', policy: {} }), /may not perform "template.write"/)
+    assert.throws(() => env.service.upsertProjectTemplate(owner, { name: 'Bad Name', policy: {} }), /must match/)
+    // The published template is immediately usable.
+    const project = await env.service.createProject(owner, { name: 'strict-project', repoRoot: env.repoRoot, templateId: 'strict' })
+    assert.equal(project.policy.reviewCount, 2)
+    assert.equal(project.policy.requireApprovalForDone, true)
   } finally {
     env.close()
   }

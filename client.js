@@ -270,6 +270,7 @@ window.__ModuleLoader__.load({
       const [taskDetail, setTaskDetail] = useState(null)
       const [budgetsState, setBudgets] = useState({ projectId: '', budgets: null })
       const [metrics, setMetrics] = useState(null)
+      const [projectTemplates, setProjectTemplates] = useState([])
       const mounted = useRef(true)
 
       useEffect(() => () => { mounted.current = false }, [])
@@ -292,6 +293,9 @@ window.__ModuleLoader__.load({
         const list = await guard('projects', () => call('projects.list'))
         if (list === undefined) return
         setProjects(list)
+        // Templates change rarely; refresh them together with the project list so a
+        // newly published template shows up without a reload.
+        void call('projectTemplates.list').then((rows) => { if (mounted.current) setProjectTemplates(rows) }).catch(() => {})
         if (projectId === '' && list.length > 0) setProjectId(list[0].id)
       }, [guard, projectId])
 
@@ -368,7 +372,7 @@ window.__ModuleLoader__.load({
       // -------------------------------------------------------- sub-views
 
       const ProjectsTab = h(ProjectsPanel, {
-        projects, selected, onSelect: setProjectId, busy, act,
+        projects, templates: projectTemplates, selected, onSelect: setProjectId, busy, act,
         onCreate: (input) => act('create-project', () => call('projects.create', input), '项目已创建，下一步生成团队。'),
         onArchive: (id) => act('archive', () => call('projects.archive', { projectId: id }), '项目已归档'),
         onPause: (id, paused) => act('pause', () => call('projects.pause', { projectId: id, paused }), paused ? '项目已暂停' : '项目已恢复'),
@@ -474,8 +478,9 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------- panels
 
-    function ProjectsPanel({ projects, selected, onSelect, onCreate, onArchive, onPause, onRestore, busy }) {
+    function ProjectsPanel({ projects, templates, selected, onSelect, onCreate, onArchive, onPause, onRestore, busy }) {
       const [name, setName] = useState('')
+      const [templateId, setTemplateId] = useState('')
       const [goal, setGoal] = useState('')
       const [repoRoot, setRepoRoot] = useState('')
       const [checks, setChecks] = useState('[]')
@@ -492,7 +497,7 @@ window.__ModuleLoader__.load({
           setPolicyError(String(failure.message ?? failure))
           return
         }
-        void onCreate({ name, goal, repoRoot, policy })
+        void onCreate({ name, goal, repoRoot, policy, templateId: templateId === '' ? undefined : templateId })
         setName('')
         setGoal('')
         setRepoRoot('')
@@ -503,6 +508,20 @@ window.__ModuleLoader__.load({
           h('strong', { style: { fontSize: 13 } }, '新建项目'),
           h('p', { style: S.muted }, '一个项目绑定一个本地 Git 仓库，以及四个彼此独立的 Bot Session。仓库必须至少已有一个 commit。'),
           h('div', { style: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } },
+            h(Field, { label: '从模板开始' }, h('select', {
+              style: S.input,
+              value: templateId,
+              onChange: (event) => {
+                const next = event.target.value
+                setTemplateId(next)
+                const template = (templates ?? []).find((row) => row.id === next)
+                // Show the template policy in the editor so it can be adjusted before creating.
+                if (template !== undefined) setChecks(JSON.stringify(template.policy ?? {}, null, 2))
+                else setChecks('[]')
+              },
+            },
+              h('option', { value: '' }, '空白项目'),
+              (templates ?? []).map((row) => h('option', { key: row.id, value: row.id }, `${row.name} — ${row.description}`)))),
             h(Field, { label: '名称' }, h('input', { style: S.input, value: name, onChange: (event) => setName(event.target.value), placeholder: 'CRM SaaS' })),
             h(Field, { label: '目标' }, h('input', { style: S.input, value: goal, onChange: (event) => setGoal(event.target.value), placeholder: '实现注册与登录' })),
             h(Field, { label: '仓库根目录（绝对路径）' }, h('input', { style: S.input, value: repoRoot, onChange: (event) => setRepoRoot(event.target.value), placeholder: 'D:/work/crm' })),

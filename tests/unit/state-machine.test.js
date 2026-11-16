@@ -6,7 +6,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { TASK_STATES, TRANSITIONS, isTerminal, reduce } from '../../lib/host/state-machine.js'
-import { ROLES, authorize, canWriteCode, ownerActor, systemActor } from '../../lib/host/permissions.js'
+import { BUILTIN_ROLES, capabilitiesForRole, authorize, canWriteCode, ownerActor, systemActor } from '../../lib/host/permissions.js'
 
 const actor = (role, kind = 'bot') => ({ kind, id: 'x', role, projectId: 'prj' })
 
@@ -66,17 +66,21 @@ test('DONE and CANCELLED are terminal', () => {
 })
 
 test('every role has a writable-code answer and only developer writes code', () => {
-  for (const role of ROLES) {
+  for (const role of BUILTIN_ROLES) {
     assert.equal(typeof canWriteCode(role), 'boolean')
   }
   assert.equal(canWriteCode('developer'), true)
   assert.equal(canWriteCode('reviewer'), false)
   assert.equal(canWriteCode('pm'), false)
+  // A custom role writes only when its template says so.
+  assert.equal(canWriteCode('frontend', { capabilities: ['write', 'message'] }), true)
+  assert.equal(canWriteCode('architect', { capabilities: ['review'] }), false)
+  assert.deepEqual([...capabilitiesForRole('qa')].sort(), ['message', 'verify', 'write'])
 })
 
 test('the owner may decide approvals; a bot may not', () => {
   assert.equal(authorize(ownerActor(), 'approval.decide').ok, true)
-  for (const role of ROLES) {
+  for (const role of BUILTIN_ROLES) {
     assert.equal(authorize(actor(role), 'approval.decide').ok, false, `${role} must not approve`)
   }
 })

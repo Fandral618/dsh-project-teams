@@ -571,7 +571,7 @@ window.__ModuleLoader__.load({
         const byCentre = b.y + NODE_H / 2
         const down = byCentre >= ayCentre
         // Stagger parallel edges so two links between different pairs stay readable.
-        const offset = 40 + (index % 6) * 26
+        const offset = 44 + (index % 8) * 30
         const band = down ? box.bottom + offset : box.top - offset
         const startY = down ? a.y + NODE_H : a.y
         const endY = down ? b.y + NODE_H : b.y
@@ -687,9 +687,14 @@ window.__ModuleLoader__.load({
               // always between the two columns and therefore clear of node bodies.
               const box = bounds()
               const down = (b.y + NODE_H / 2) >= (a.y + NODE_H / 2)
-              const offset = 40 + (labelIndex % 6) * 26
-              const left = (a.x + b.x) / 2 + NODE_W / 2
-              const top = down ? box.bottom + offset - 14 : box.top - offset + 14
+              const offset = 44 + (labelIndex % 8) * 30
+              // Spread labels along the run: adjacent pairs used to stack their chips at the
+              // same midpoint, which is why four labels collided in the middle.
+              const aCentre = a.x + NODE_W / 2
+              const bCentre = b.x + NODE_W / 2
+              const share = 0.22 + (labelIndex % 4) * 0.18
+              const left = aCentre + (bCentre - aCentre) * share
+              const top = down ? box.bottom + offset - 18 : box.top - offset + 18
               return h('button', {
                 key: 'label:' + edge.id,
                 type: 'button',

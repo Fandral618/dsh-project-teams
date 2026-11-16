@@ -556,18 +556,23 @@ window.__ModuleLoader__.load({
         const ay = a.y + NODE_H / 2
         const bx = b.x
         const by = b.y + NODE_H / 2
-        const stroke = Math.min(80, Math.max(40, Math.abs(bx - ax) / 3))
-        const midX = bx > ax ? ax + stroke : ax - stroke
         const radius = 8
-        if (Math.abs(by - ay) < 2) return 'M ' + ax + ' ' + ay + ' L ' + bx + ' ' + by
         const dir = by > ay ? 1 : -1
-        const approach = bx > midX ? midX : bx
+        const gap = 26
+        // Lane: clear of both boxes. Forward edges use the midpoint between the
+        // columns; backward edges go around the right side of both boxes.
+        const forward = bx > ax + gap
+        const lane = forward
+          ? Math.round((ax + bx) / 2)
+          : Math.max(ax, bx) + NODE_W + gap
+        if (Math.abs(by - ay) < 2) return 'M ' + ax + ' ' + ay + ' L ' + bx + ' ' + by
+        const fromX = forward ? lane : ax + NODE_W * 0 + gap
         return [
           'M ' + ax + ' ' + ay,
-          'L ' + (midX - radius * Math.sign(midX - ax)) + ' ' + ay,
-          'Q ' + midX + ' ' + ay + ', ' + midX + ' ' + (ay + radius * dir),
-          'L ' + midX + ' ' + (by - radius * dir),
-          'Q ' + midX + ' ' + by + ', ' + (midX + radius * Math.sign(approach - midX)) + ' ' + by,
+          'L ' + (fromX - radius * Math.sign(fromX - ax || 1)) + ' ' + ay,
+          'Q ' + fromX + ' ' + ay + ', ' + fromX + ' ' + (ay + radius * dir),
+          'L ' + fromX + ' ' + (by - radius * dir),
+          'Q ' + fromX + ' ' + by + ', ' + (fromX + radius * Math.sign(bx - fromX || 1)) + ' ' + by,
           'L ' + bx + ' ' + by,
         ].join(' ')
       }
@@ -787,6 +792,16 @@ window.__ModuleLoader__.load({
                 h('div', { style: { fontSize: 12 } }, String(message.body).slice(0, 240)))),
         )
       }
+      // Normalise both shapes: a canvas node carries sessionId/run/blocked, a team row
+      // carries session_id and may omit run/blocked entirely. Reading them directly
+      // threw and unmounted the workspace on the first node click.
+      const facts = {
+        sessionId: String(bot.sessionId ?? bot.session_id ?? ''),
+        liveness: bot.liveness?.state ?? 'missing',
+        run: bot.run ?? null,
+        blocked: bot.blocked ?? null,
+        currentTask: bot.currentTask ?? null,
+      }
       const botTasks = tasks.filter((task) => task.owner_bot_id === bot.id)
       const inbound = messages.filter((message) => message.to_bot_id === bot.id)
       const outbound = messages.filter((message) => message.from_bot_id === bot.id)
@@ -798,28 +813,28 @@ window.__ModuleLoader__.load({
           h('strong', { style: { fontSize: 14, textTransform: 'uppercase' } }, bot.label || bot.role),
           h('span', { style: S.grow }),
           h(Button, { onClick: onClose }, '关闭')),
-        h('div', { style: S.muted }, 'Session · ' + bot.session_id),
+        h('div', { style: S.muted }, 'Session · ' + facts.sessionId),
         h('div', { style: S.row },
-          h(Badge, { value: bot.liveness.state === 'online' || bot.liveness.state === 'running' ? 'DONE' : bot.liveness.state === 'cold' ? 'INCOMPLETE' : 'FAIL', label: LIVENESS[bot.liveness.state] ?? bot.liveness.state }),
+          h(Badge, { value: facts.liveness === 'online' || facts.liveness === 'running' ? 'DONE' : facts.liveness === 'cold' ? 'INCOMPLETE' : 'FAIL', label: LIVENESS[facts.liveness] ?? facts.liveness }),
           h('span', { style: S.muted }, '预设 ' + (bot.agent_preset ?? '默认')),
           h('span', { style: S.muted }, '最近活动 ' + ago(bot.last_seen_at))),
         h('div', { style: S.row },
-          h(Button, { onClick: () => onCopy(bot.session_id) }, '复制 Session id'),
+          h(Button, { onClick: () => onCopy(facts.sessionId) }, '复制 Session id'),
           h(Button, { kind: 'primary', disabled: busy !== '', onClick: () => onWake(bot) }, '发消息')),
         h('div', { style: { display: 'grid', gap: 6, marginTop: 4 } },
           h('strong', { style: { fontSize: 12.5 } }, '当前任务'),
-          bot.currentTask === null
+          facts.currentTask === null
             ? h('span', { style: S.muted }, '空闲')
             : h('div', { style: { display: 'grid', gap: 4 } },
-                h('div', { style: S.row }, h('span', { style: { fontSize: 12 } }, bot.currentTask.id + ' ' + bot.currentTask.title), h(Badge, { value: bot.currentTask.status })),
-                h(Button, { onClick: () => onOpenTask(bot.currentTask.id) }, '打开任务'))),
-        bot.run === null ? null : h('div', { style: { display: 'grid', gap: 3, marginTop: 4 } },
+                h('div', { style: S.row }, h('span', { style: { fontSize: 12 } }, facts.currentTask.id + ' ' + facts.currentTask.title), h(Badge, { value: facts.currentTask.status })),
+                h(Button, { onClick: () => onOpenTask(facts.currentTask.id) }, '打开任务'))),
+        facts.run === null ? null : h('div', { style: { display: 'grid', gap: 3, marginTop: 4 } },
           h('strong', { style: { fontSize: 12.5 } }, 'Git 工作区'),
-          h('div', { style: S.code }, bot.run.branch),
-          h('div', { style: { ...S.code, fontSize: 10.5 } }, bot.run.worktree),
-          h('div', { style: S.muted }, '租约至 ' + when(bot.run.leaseUntil) + ' · 令牌 ' + bot.run.tokensUsed)),
-        bot.blocked === null ? null : h('div', { style: { marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(180,35,24,.35)', color: '#b42318', fontSize: 12 } },
-          '阻塞：' + bot.blocked.reason),
+          h('div', { style: S.code }, facts.run.branch),
+          h('div', { style: { ...S.code, fontSize: 10.5 } }, facts.run.worktree),
+          h('div', { style: S.muted }, '租约至 ' + when(facts.run.leaseUntil) + ' · 令牌 ' + facts.run.tokensUsed)),
+        facts.blocked === null ? null : h('div', { style: { marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(180,35,24,.35)', color: '#b42318', fontSize: 12 } },
+          '阻塞：' + String(facts.blocked.reason ?? '')),
         h('div', { style: { display: 'grid', gap: 3, marginTop: 6 } },
           h('strong', { style: { fontSize: 12.5 } }, '跨 Session 消息'),
           h('div', { style: S.muted }, '收到 ' + inbound.length + ' 条 · 发出 ' + outbound.length + ' 条（最近 80 条内）'),
@@ -969,7 +984,9 @@ window.__ModuleLoader__.load({
       const narrow = viewportWidth < 1180
       const selected = projects.find((project) => project.id === projectId)
       const budgets = budgetsState.budgets
+      const selectedNode = canvas?.nodes?.find((node) => node.botId === selectedBotId)
       const selectedBot = selectedEdge === null ? teams.find((bot) => bot.id === selectedBotId) : undefined
+      const selectedForInspector = selectedEdge === null ? (selectedNode ?? selectedBot) : undefined
       const selectedEdgeValue = selectedEdge ?? undefined
 
       const openTask = useCallback(async (taskId) => {
@@ -1166,7 +1183,7 @@ window.__ModuleLoader__.load({
               : h('div', { style: { minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' } }, morePanelFor[more] ?? null)),
           h('div', { style: { minHeight: 0 } },
             h(Inspector, {
-              bot: selectedBot,
+              bot: selectedForInspector,
               edge: selectedEdgeValue,
               messages: selectedEdge === null ? messages : edgeMessages,
               tasks, delivery, teams, busy,

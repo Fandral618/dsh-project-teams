@@ -99,7 +99,7 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 ## 测试
 
 ```sh
-npm test            # 66 个测试：单元 + 集成 + 安全
+npm test            # 69 个测试：单元 + 集成 + 安全
 npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration

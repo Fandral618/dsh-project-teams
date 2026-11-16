@@ -95,6 +95,8 @@ qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy
 | `activity.list` | GET | `projectId`、`limit?` | 审计 + 任务事件（新→旧） |
 | `overview.get` | GET | `projectId` | 计数、进行中运行、阻塞、活动 |
 | `dashboard.get` | GET | `projectId` | 质量与成本指标 |
+| `canvas.get` | GET | `projectId`、`sinceMinutes?` | 画布投影：真实 Bot 节点（Session/存活/当前任务/运行/阻塞）+ 已保存布局 + 三类真实连线 |
+| `canvas.save` | POST | `projectId`、`nodes[{botId,x,y}]`、`view?` | 保存节点坐标与视口（仅本项目 Bot、坐标有界、缩放 0.3–2.5、写审计） |
 | `timeline.get` | GET | `projectId`、`limit?`、`taskId?` | 统一时间线（任务事件/审计/消息/检查/评审/审批） |
 | `m0.get` / `m0.probe` / `m0.verify` | GET/POST | `reuse?` | M0 兼容性证据 |
 

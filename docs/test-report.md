@@ -15,9 +15,9 @@ node --test "tests/security/*.test.js"
 | 套件 | 数量 | 结果 | 覆盖内容 |
 | --- | --- | --- | --- |
 | `tests/unit/state-machine.test.js` | 13 | **全部通过** | 转移表可达性、非法/未知动作、角色拒绝、终态、权限矩阵（仅 Owner 可批准、归属校验、跨项目、未知操作） |
-| `tests/integration/engine.test.js` | 45 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
+| `tests/integration/engine.test.js` | 48 | **全部通过** | 团队创建（4 个不同 Session + 各自预设 + 角色说明）、仓库校验、验收标准守卫、依赖环拒绝、原子认领竞争、拒绝审计、消息幂等、死信与重投、循环预算、跨项目拒绝、暂停、并行工作树隔离、评审者无可写工作树、worktree→commit→检查→盲审→门禁→DONE 全链路、失败检查拦住批准者、新 commit 使评审过期、"skip review" 文本无效、高风险需 Owner 按 commit 批准、租约过期恢复、归档行为、活动记录、工件 diff 落盘、**工作树位于仓库内（沙箱回归）**、**中断 Bot 卡住的回合**、**写入范围越界告警**、**已决评审不被新的待处理请求遮蔽（回归）** |
 | `tests/security/security.test.js` | 8 | **全部通过** | 路径围栏、路径段校验（含 Windows 设备名）、Bot 不能批准、批准绑定 revision、subagent 会话不能当成员、不可信消息框、Owner 不可被冒充、PM 不能归档/认领 |
-| **合计** | **66** | **66 通过 / 0 失败** | |
+| **合计** | **69** | **69 通过 / 0 失败** | |
 
 运行时间约 50 秒（集成测试为每个用例创建真实 `git init` 仓库与真实 worktree）。
 另有结构门禁：`node --check` 覆盖全部发布模块；`node scripts/demo-repo.mjs` 生成的演示仓库 build 检查通过、3 个测试通过。
@@ -241,3 +241,11 @@ Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激
 （显示新增的**时间线**与**质量**）；`09-quality-metrics.json` 记录质量面板渲染的实时数值
 （完成率 20%、检查通过率 100%、findings minor 1 / nit 4、消息 58）。
 像素级截取在会话断开后不可用（屏幕 DC 失效），原因与替代方法写在 `docs/screenshots/README.md`。
+
+## 十五、v1.1 工作台（U1/U2 Host 侧）
+
+- 迁移 **v4** 新增 `canvas_nodes` / `canvas_views`（只增表）；真实库副本 v3→v4 后数据不变（1 项目 / 5 任务 / 58 消息）。
+- `canvas.get`：真实节点 + 三类连线（collaboration 由能力推导、communication 由真实消息聚合、handoff 由交接消息与 assign 事件）。无数据即无连线。
+- `canvas.save`：仅接受本项目 Bot，坐标有界，缩放夹在 0.3–2.5，写审计。
+- `messages.list` 增加 `between`/`threadId` 过滤，供连线详情使用。
+- 新增 3 条测试，总数 69。

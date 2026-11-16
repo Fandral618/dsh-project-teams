@@ -1275,3 +1275,107 @@ test('an executed merge can be rolled back with a revert commit (P1)', async () 
     env.close()
   }
 })
+
+// ------------------------------------------------ v1.1 workspace: canvas (U1/U2)
+
+test('the canvas layout persists node positions and the viewport (v1.1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const first = bots[0]
+    const saved = env.service.saveCanvasLayout(owner, project.id, {
+      nodes: [
+        { botId: first.id, x: 120, y: 80 },
+        { botId: bots[1].id, x: 420.4, y: 160.6 },
+      ],
+      view: { x: -40, y: 12, zoom: 1.4 },
+    })
+    assert.equal(saved.nodes, 2)
+    const layout = env.service.canvasLayout(project.id)
+    assert.deepEqual(layout.nodes.sort((a, b) => a.x - b.x), [
+      { botId: first.id, x: 120, y: 80 },
+      { botId: bots[1].id, x: 420, y: 161 },
+    ])
+    assert.deepEqual(layout.view, { x: -40, y: 12, zoom: 1.4 })
+
+    // A later partial save only touches the nodes it names.
+    env.service.saveCanvasLayout(owner, project.id, { nodes: [{ botId: first.id, x: 999, y: 999 }] })
+    const again = env.service.canvasLayout(project.id)
+    assert.equal(again.nodes.find((node) => node.botId === first.id).x, 999)
+    assert.equal(again.nodes.length, 2)
+
+    // Unknown bots, non-finite coordinates and absurd zoom are refused.
+    assert.throws(() => env.service.saveCanvasLayout(owner, project.id, { nodes: [{ botId: 'bot_nope', x: 1, y: 1 }] }), /does not belong/)
+    assert.throws(() => env.service.saveCanvasLayout(owner, project.id, { nodes: [{ botId: first.id, x: Number.NaN, y: 1 }] }), /finite/)
+    env.service.saveCanvasLayout(owner, project.id, { view: { x: 0, y: 0, zoom: 99 } })
+    assert.equal(env.service.canvasLayout(project.id).view.zoom, 2.5)
+    const auditRows = env.db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'canvas.save'").get().n
+    assert.ok(Number(auditRows) >= 3)
+  } finally {
+    env.close()
+  }
+})
+
+test('the canvas projection uses real bots and only real edges (v1.1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const reviewer = actorOf(bots, 'reviewer')
+    const pm = actorOf(bots, 'pm')
+    const empty = await env.service.canvas(owner, project.id, { sinceMinutes: 60 })
+    assert.equal(empty.nodes.length, 4)
+    assert.ok(empty.nodes.every((node) => typeof node.sessionId === 'string' && node.sessionId.startsWith('session-')))
+    assert.ok(empty.nodes.every((node) => node.currentTask === null))
+    // Collaboration edges are policy facts; communication/handoff need real rows.
+    assert.ok(empty.edges.some((edge) => edge.kind === 'collaboration'))
+    assert.equal(empty.edges.filter((edge) => edge.kind === 'communication').length, 0)
+    assert.equal(empty.edges.filter((edge) => edge.kind === 'handoff').length, 0)
+
+    // One real message creates a communication edge with its stats.
+    env.service.sendMessage(dev.actor, { toBotId: pm.bot.id, type: 'question', body: 'which field name?' })
+    // One assignment creates a handoff edge (engine -> bot).
+    const task = env.service.createTask(owner, project.id, { title: 'canvas task', acceptance: ['x'] })
+    env.service.transition(owner, task.id, 'submit', { expectedVersion: task.version })
+    env.service.assignTask(owner, task.id, dev.bot.id, task.version + 1)
+
+    const filled = await env.service.canvas(owner, project.id, { sinceMinutes: 60 })
+    const comm = filled.edges.filter((edge) => edge.kind === 'communication')
+    // dev -> pm is the message the test sent; pm -> dev is the engine's assignment
+    // notice, which is also a real message row.
+    const devToPm = comm.find((edge) => edge.from === dev.bot.id && edge.to === pm.bot.id)
+    assert.ok(devToPm !== undefined, 'dev -> pm communication edge is missing')
+    assert.equal(devToPm.count, 1)
+    assert.equal(devToPm.lastType, 'question')
+    assert.match(String(devToPm.lastBody), /field name/)
+    assert.ok(comm.every((edge) => typeof edge.lastAt === 'number' && edge.lastAt > 0))
+    const handoff = filled.edges.filter((edge) => edge.kind === 'handoff')
+    assert.ok(handoff.some((edge) => edge.to === dev.bot.id && edge.lastType === 'assign'))
+    // The node for the assigned bot now carries its real task.
+    const assigned = filled.nodes.find((node) => node.botId === dev.bot.id)
+    assert.equal(assigned.currentTask.id, task.id)
+    assert.equal(assigned.currentTask.status, 'ASSIGNED')
+
+    // A window that excludes the message drops the communication edge again.
+    env.db.prepare('UPDATE messages SET created_at = ?').run(Date.now() - 3 * 86_400_000)
+    const old = await env.service.canvas(owner, project.id, { sinceMinutes: 60 })
+    assert.equal(old.edges.filter((edge) => edge.kind === 'communication').length, 0)
+    void reviewer
+  } finally {
+    env.close()
+  }
+})
+
+test('migration keeps every table while adding the canvas tables (v1.1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const tables = env.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name)
+    for (const required of ['projects', 'project_bots', 'tasks', 'task_events', 'task_runs', 'messages', 'artifacts', 'reviews', 'approvals', 'canvas_nodes', 'canvas_views']) {
+      assert.ok(tables.includes(required), 'missing table ' + required)
+    }
+    const version = env.db.prepare('SELECT version FROM schema_version').get()
+    assert.equal(Number(version.version), 4)
+  } finally {
+    env.close()
+  }
+})

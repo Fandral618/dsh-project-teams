@@ -398,6 +398,8 @@ window.__ModuleLoader__.load({
 
       const fitted = useRef('')
 
+      positionsRef.current = positions
+
       // Seed positions once per project: saved coordinates win, new Bots get a grid slot.
       // After seeding, fit the view once so a first-time project is not off-screen.
       useEffect(() => {
@@ -431,6 +433,7 @@ window.__ModuleLoader__.load({
       }, [canvas?.project?.id, nodes.length])
 
       const fitRef = useRef(null)
+      const positionsRef = useRef({})
 
       const persist = useCallback((nextPositions, nextView) => {
         const payload = {
@@ -499,18 +502,21 @@ window.__ModuleLoader__.load({
         const zoom = view.zoom
         const move = (moveEvent) => {
           const point = toLocal(moveEvent)
-          setPositions((current) => ({
-            ...current,
-            [node.botId]: { x: Math.round(origin.x + (point.x - start.x) / zoom), y: Math.round(origin.y + (point.y - start.y) / zoom) },
-          }))
+          setPositions((current) => {
+            const next = {
+              ...current,
+              [node.botId]: { x: Math.round(origin.x + (point.x - start.x) / zoom), y: Math.round(origin.y + (point.y - start.y) / zoom) },
+            }
+            positionsRef.current = next
+            return next
+          })
         }
         const up = () => {
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
-          setPositions((current) => {
-            persist(current, view)
-            return current
-          })
+          // Persist from the ref: side effects inside a state updater are dropped when
+          // React bails out or the subtree unmounts, which is what a drag-end does.
+          persist(positionsRef.current, view)
         }
         window.addEventListener('pointermove', move)
         window.addEventListener('pointerup', up)
@@ -613,6 +619,7 @@ window.__ModuleLoader__.load({
               const next = {}
               nodes.forEach((node, index) => { next[node.botId] = { x: 80 + index * 260, y: 120 } })
               setPositions(next)
+              positionsRef.current = next
               persist(next, { x: 0, y: 0, zoom: 1 })
               setView({ x: 0, y: 0, zoom: 1 })
             },

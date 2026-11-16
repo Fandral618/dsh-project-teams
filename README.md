@@ -41,6 +41,7 @@ Session 详情、底部跨 Session 事件时间线。五个主视图：Overview 
   坐标与视口存放在 `canvas_nodes` / `canvas_views`（迁移 v4），重启后保留。
 - 连线只来自真实数据：协作关系（能力推导）、实际通信（消息按 Bot 对聚合，含次数与最近时间）、任务交接
   （交接类消息 + assign 事件）；可按类型开关与 1h/24h/7d 时间窗筛选，点击查看该方向的消息历史与关联任务。
+- `team.repair`（Owner）：某个 Bot 的 Session 坏掉时新建独立会话并重绑，旧 id 入审计。
 - 右侧 Inspector：任务、Git 分支/worktree、阻塞、收发消息、工件与检查；操作全部接真实 API
   （复制 Session id、发消息 = `team.wake`、打开任务、打开交付）。
 - React Flow 在插件 Client 模块里不可用（模块表只暴露 react 等），因此画布是零依赖实现；原因见
@@ -114,7 +115,7 @@ Session 详情、底部跨 Session 事件时间线。五个主视图：Overview 
 ## 测试
 
 ```sh
-npm test            # 69 个测试：单元 + 集成 + 安全
+npm test            # 70 个测试：单元 + 集成 + 安全
 npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration

@@ -1379,3 +1379,40 @@ test('migration keeps every table while adding the canvas tables (v1.1)', async 
     env.close()
   }
 })
+
+// ------------------------------------------------ bot session repair (v1.1)
+
+test('repairing a Bot Session rebinds it, audits the old id and clears queued mail (v1.1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = bots.find((bot) => bot.role === 'developer')
+    const before = String(dev.session_id)
+    // Simulate a broken session: the adapter no longer knows it.
+    env.service.adapter.sessions.delete(before)
+    env.service.enqueueNoticeUnsafe(project.id, dev.id, 'system_notice', 'queued while broken', null)
+    const queued = env.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE to_bot_id = ? AND state = 'QUEUED'").get(dev.id).n
+    assert.ok(Number(queued) >= 1)
+
+    const repaired = await env.service.repairBotSession(owner, project.id, dev.id)
+    assert.notEqual(String(repaired.session_id), before)
+    assert.equal(repaired.state, 'active')
+    assert.ok(env.service.adapter.sessions.has(String(repaired.session_id)), 'the new Session exists in the Host')
+    const audit = env.db.prepare("SELECT result, detail FROM audit_events WHERE action = 'bot.repair' ORDER BY seq DESC LIMIT 1").get()
+    assert.equal(audit.result, 'ok')
+    const detail = JSON.parse(audit.detail)
+    assert.equal(detail.previousSessionId, before)
+    assert.equal(detail.sessionId, String(repaired.session_id))
+    const stillQueued = env.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE to_bot_id = ? AND state IN ('QUEUED','RETRYING')").get(dev.id).n
+    assert.equal(Number(stillQueued), 0, 'queued mail for the dead Session is cancelled')
+
+    // A bot cannot repair anything.
+    const reviewer = bots.find((bot) => bot.role === 'reviewer')
+    await assert.rejects(
+      () => env.service.repairBotSession({ kind: 'bot', id: reviewer.id, role: reviewer.role, projectId: project.id, sessionId: reviewer.session_id, capabilities: env.service.capabilitiesOf(reviewer) }, project.id, dev.id),
+      /may not perform "bot.repair"/,
+    )
+  } finally {
+    env.close()
+  }
+})

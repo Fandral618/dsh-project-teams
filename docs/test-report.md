@@ -283,3 +283,23 @@ Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激
 - **未验证（本轮环境限制）**：节点拖动。CDP 坐标点落在宿主应用的标题元素上（`elementFromPoint` 返回 `H2.…title`），说明在该浏览器标签页里工作台与会话视图同时渲染、会话层在上，合成鼠标事件到不了画布；
   挂到节点上的探针收不到任何 `pointerdown`。因此「拖不动」是**测试环境现象**，尚不能判定为产品缺陷；下轮需在只渲染工作台的页面状态下重测。
 - 顺带加固：节点拖动改为按下时注册 window 级 `pointermove/pointerup`（会话结束即移除），不再依赖 pointer capture——即使画布被其它层覆盖也能正确结束手势。
+
+## 十九、v1.9.1 — 按真实使用反馈收敛（画布交互 + Bot 会话修复）
+
+四项问题全部由业主在真实工作台上复现并逐轮截图确认，修复顺序即反馈顺序：
+
+| # | 现象 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 点节点后整个工作台消失 | Inspector 直接读 `bot.run.branch` / `bot.blocked.reason` / `bot.session_id`，而团队行没有 `run`/`blocked`，`undefined.branch` 抛错使整棵子树卸载 | 归一化 `sessionId/liveness/run/blocked/currentTask`，并优先用画布节点（带 run/worktree） |
+| 2 | 连线穿过节点方框 | 横向段走在源节点所在行，同行还有别的框 | 改为「上/下沿出线 → 框外总线 → 同侧入框」的带状路由 |
+| 3 | 多条线叠成一条 | `path(from, to)` 未传 index，偏移量恒为 40 | 传入 `edgeIndex`，偏移 `44 + (index%8)*30` |
+| 4 | 标签互相压 | 每对都放在行程中点 | 沿线分散到 0.22/0.40/0.58/0.76，并抬高 18px |
+
+另加两个能力：
+
+- **自动排布**按钮：一键把团队排成一行并持久化（带状路由的最佳布局）。
+- **Bot 会话修复** `POST team.repair` / `pt_owner repair_bot`：当某 Bot 的 Session 无法被 Host 投影（真实故障：`failed to project session … reading 'kind'`）时，用同一角色模板与预设新建一个**独立** Session、重绑、重投角色简报，把旧 Session id 记入审计，并取消该 Bot 的排队消息。旧会话历史不被删除或改写。
+
+真实故障处置记录：演示项目 developer 的 `session-2398a071-…` 投影失败 → `repair_bot` 重绑到 `session-c25be46f-…`，`wake` 返回 `live`，队列中的死信不再重试。
+
+测试：新增 1 条（修复路径：重绑、审计旧 id、清空排队消息、Bot 无权调用），总数 **70**。

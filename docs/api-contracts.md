@@ -74,6 +74,7 @@ qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy
 | `tasks.dependency` | POST | `taskId`、`dependsOn` | 依赖行 |
 | `tasks.verify` | POST | `taskId`、`types?[]` | 验证行（真的执行命令） |
 | `messages.list` | GET | `projectId`、`taskId?`、`state?`、`limit?` | 消息 |
+| `messages.broadcast` | POST | `projectId`、`channel`、`body`、`taskId?` | Owner 向频道广播（每个成员一条系统通告） |
 | `messages.replay` | POST | `messageId` | 重新入队的消息（仅死信） |
 | `delivery.list` | GET | `projectId` | 工件、验证运行、评审 |
 | `delivery.diff` | GET | `artifactId` | 已保存的 unified diff |
@@ -92,6 +93,7 @@ qa: write+verify+message）。**自定义角色**在角色模板的 `tool_policy
 | `activity.list` | GET | `projectId`、`limit?` | 审计 + 任务事件（新→旧） |
 | `overview.get` | GET | `projectId` | 计数、进行中运行、阻塞、活动 |
 | `dashboard.get` | GET | `projectId` | 质量与成本指标 |
+| `timeline.get` | GET | `projectId`、`limit?`、`taskId?` | 统一时间线（任务事件/审计/消息/检查/评审/审批） |
 | `m0.get` / `m0.probe` / `m0.verify` | GET/POST | `reuse?` | M0 兼容性证据 |
 
 常见错误码：`VERSION_CONFLICT`、`ILLEGAL_TRANSITION`、`ROLE_FORBIDDEN`、`FORBIDDEN`、`FORBIDDEN_OWNERSHIP`、

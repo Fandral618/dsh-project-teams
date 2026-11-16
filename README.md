@@ -99,7 +99,7 @@ dsh plugin --profile <profile> add /绝对路径/project-teams
 ## 测试
 
 ```sh
-npm test            # 61 个测试：单元 + 集成 + 安全
+npm test            # 64 个测试：单元 + 集成 + 安全
 npm run verify:restart   # 在隔离 profile 中做两次真实进程启动，验证重启后仍能识别会话
 npm run test:unit
 npm run test:integration
@@ -135,9 +135,9 @@ npm run test:security
 | 项目模板 | ✅ | 内置 `web-node`/`python`/`minimal` + Owner 可发布模板；`projects.create` 支持 `templateId`，显式字段覆盖 |
 | 自定义角色 | ✅ | 能力化 ACL（coordinate/write/review/verify/message）；在角色模板声明 capabilities 即可新增角色（如 architect/frontend） |
 | 消息搜索 | ✅ | `messages.list` 的 `query` + 工作台搜索框 |
-| 频道 / 群组消息 | ✗ | 未做（当前是点对点 + 角色寻址） |
+| 频道 / 群组消息 | ✅ | `channel` 寻址（all / role:<r> / custom:<n>）扇出为每人一条消息并共享 thread；Owner 可广播系统通告 |
 | 质量仪表板 / 成本监控 | ✅ | 新「质量」标签页：完成率、返工率、平均周期、检查通过率、findings 分布、令牌用量与预算、消息/死信、决策计数 |
-| Timeline | ◐ | 活动记录 + 任务事件已可查；独立时间线视图未做 |
+| Timeline | ✅ | 工作台「时间线」标签页合并任务事件/审计/消息/检查/评审/审批，支持类型与任务筛选 |
 | **合并执行器** | ✅ | Owner 批准后由 `decisions.executeMerge` 执行：重验门禁/分支/base、`--no-ff`、冲突回滚、幂等、写审计 |
 | PR 集成 / 回滚 | ✗ | 远程 PR 与回滚脚本未做 |
 | 双审 / 交叉模型 | ✅ | `policy.reviewCount=2` → 两个独立 reviewer 各自 blind checkout；门禁需两个 APPROVE；交叉模型用第二位 reviewer 的不同预设 |

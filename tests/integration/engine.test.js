@@ -1097,3 +1097,91 @@ test('the owner can publish a project template and a bot cannot (P1)', async () 
     env.close()
   }
 })
+
+// -------------------------------------------------- channels and timeline
+
+test('a channel message fans out one row per member and stays addressable (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const sent = env.service.sendChannelMessage(dev.actor, { channel: 'all', type: 'progress', body: 'starting T-1' })
+    assert.equal(sent.messages.length, 3, 'every member except the sender')
+    const rows = env.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at').all(sent.threadId)
+    assert.equal(rows.length, 3)
+    assert.ok(rows.every((row) => row.from_bot_id === dev.bot.id))
+    assert.ok(!rows.some((row) => row.to_bot_id === dev.bot.id), 'a broadcast never echoes back')
+
+    // Role channel reaches only that role.
+    const toQa = env.service.sendChannelMessage(dev.actor, { channel: 'role:qa', type: 'handoff', body: 'please test' })
+    assert.equal(toQa.messages.length, 1)
+    const qaMessage = env.service.message(toQa.messages[0].id)
+    assert.equal(qaMessage.to_bot_id, actorOf(bots, 'qa').bot.id)
+
+    // A custom channel resolves from the project policy.
+    env.service.updateProject(owner, project.id, { policy: { channels: [{ name: 'triage', roles: ['pm', 'qa'] }] } })
+    const triage = env.service.sendChannelMessage(dev.actor, { channel: 'custom:triage', type: 'blocker', body: 'need triage' })
+    assert.equal(triage.messages.length, 2)
+
+    // Delivery reuses the outbox: every fan-out row is delivered once.
+    await env.dispatcher.tick()
+    const delivered = env.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE thread_id = ? AND state = 'DELIVERED'").get(sent.threadId).n
+    assert.equal(Number(delivered), 3)
+    assert.throws(() => env.service.sendChannelMessage(dev.actor, { channel: 'role:nope', type: 'progress', body: 'x' }), /channel/)
+  } finally {
+    env.close()
+  }
+})
+
+test('only the owner can broadcast into a channel (P1)', async () => {
+  const env = makeEnvironment()
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    assert.throws(
+      () => env.service.broadcastChannel(dev.actor, { projectId: project.id, channel: 'all', body: 'hi' }),
+      /may not perform "message.broadcast"/,
+    )
+    const result = env.service.broadcastChannel(owner, { projectId: project.id, channel: 'all', body: 'owner announcement' })
+    assert.equal(result.messageIds.length, 4, 'the owner broadcast reaches every Bot')
+    const rows = env.db.prepare('SELECT * FROM messages WHERE thread_id = ?').all(result.threadId)
+    assert.ok(rows.every((row) => row.type === 'system_notice'))
+  } finally {
+    env.close()
+  }
+})
+
+test('the timeline merges task events, messages, checks, reviews and approvals (P1)', async () => {
+  const env = makeEnvironment({ checks: [{ type: 'test', command: 'node -e process.exitCode=0', required: true }] })
+  try {
+    const { project, bots } = await seedProject(env)
+    const dev = actorOf(bots, 'developer')
+    const reviewer = actorOf(bots, 'reviewer')
+    const task = await readyTask(env, project, dev)
+    env.service.sendMessage(dev.actor, { toRole: 'pm', type: 'question', body: 'which field?' })
+    const run = await env.service.startRun(dev.actor, task.id)
+    writeFileSync(join(run.worktree_path, 'tl.js'), 'x\n')
+    await env.service.submitArtifact(dev.actor, task.id, { message: 'tl' })
+    env.service.transition(dev.actor, task.id, 'submit_review', { expectedVersion: env.service.task(task.id).version })
+    await env.service.requestReview(dev.actor, task.id)
+    await env.service.runVerification(dev.actor, task.id)
+    await env.service.submitReview(reviewer.actor, { taskId: task.id, verdict: 'APPROVE', findings: [] })
+
+    const timeline = env.service.timeline(owner, project.id, { limit: 200 })
+    const kinds = new Set(timeline.map((row) => row.kind))
+    for (const kind of ['task-event', 'message', 'verification', 'review']) {
+      assert.ok(kinds.has(kind), `timeline is missing ${kind}`)
+    }
+    // Newest first, and each entry carries an actor + summary.
+    for (let index = 1; index < timeline.length; index += 1) {
+      assert.ok(timeline[index - 1].at >= timeline[index].at, 'timeline must be sorted newest-first')
+    }
+    assert.ok(timeline.every((row) => typeof row.actor === 'string' && typeof row.summary === 'string'))
+    // Task filter narrows it.
+    const onlyTask = env.service.timeline(owner, project.id, { taskId: task.id })
+    assert.ok(onlyTask.length > 0)
+    assert.ok(onlyTask.every((row) => row.taskId === undefined || row.taskId === task.id))
+  } finally {
+    env.close()
+  }
+})

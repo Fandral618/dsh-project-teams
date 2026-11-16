@@ -271,6 +271,7 @@ window.__ModuleLoader__.load({
       const [budgetsState, setBudgets] = useState({ projectId: '', budgets: null })
       const [metrics, setMetrics] = useState(null)
       const [projectTemplates, setProjectTemplates] = useState([])
+      const [timeline, setTimeline] = useState([])
       const mounted = useRef(true)
 
       useEffect(() => () => { mounted.current = false }, [])
@@ -302,7 +303,7 @@ window.__ModuleLoader__.load({
       const refreshProject = useCallback(async () => {
         if (projectId === '') return
         await guard('project', async () => {
-          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets, nextMetrics] = await Promise.all([
+          const [nextOverview, nextTeam, nextTasks, nextMessages, nextDelivery, nextDecisions, nextActivity, nextBudgets, nextMetrics, nextTimeline] = await Promise.all([
             call('overview.get', { projectId }),
             call('team.list', { projectId }),
             call('tasks.list', { projectId }),
@@ -312,6 +313,7 @@ window.__ModuleLoader__.load({
             call('activity.list', { projectId, limit: 60 }),
             call('budgets.get', { projectId }).catch(() => null),
             call('dashboard.get', { projectId }).catch(() => null),
+            call('timeline.get', { projectId, limit: 200 }).catch(() => []),
           ])
           if (!mounted.current) return
           setOverview(nextOverview)
@@ -323,6 +325,7 @@ window.__ModuleLoader__.load({
           setActivity(nextActivity)
           setBudgets({ projectId, budgets: nextBudgets })
           setMetrics(nextMetrics)
+          setTimeline(Array.isArray(nextTimeline) ? nextTimeline : [])
         })
       }, [guard, projectId])
 
@@ -399,6 +402,7 @@ window.__ModuleLoader__.load({
 
       const MessagesTab = h(MessagesPanel, {
         messages, busy,
+        onBroadcast: (channel, body) => act('broadcast', () => call('messages.broadcast', { projectId, channel, body }), '已广播到频道'),
         onReplay: (messageId) => act('replay', () => call('messages.replay', { messageId }), '消息已重新入队'),
       })
 
@@ -415,6 +419,7 @@ window.__ModuleLoader__.load({
         onExecuteMerge: (changeId) => act('merge', () => call('decisions.executeMerge', { changeId }), '合并已执行'),
       })
 
+      const TimelineTab = h(TimelinePanel, { timeline })
       const QualityTab = h(QualityPanel, { metrics })
       const SettingsTab = h(SettingsPanel, {
         status,
@@ -434,6 +439,7 @@ window.__ModuleLoader__.load({
         ['tasks', '任务'],
         ['messages', '消息'],
         ['delivery', '交付'],
+        ['timeline', '时间线'],
         ['quality', '质量'],
         ['decisions', `决策${decisions !== null && (decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length) > 0 ? ` (${decisions.changes.filter((row) => row.status === 'PENDING').length + decisions.gated.filter((entry) => entry.gate.status === 'NEEDS_HUMAN').length})` : ''}`],
         ['projects', '项目'],
@@ -446,6 +452,7 @@ window.__ModuleLoader__.load({
         tasks: TasksTab,
         messages: MessagesTab,
         delivery: DeliveryTab,
+        timeline: TimelineTab,
         quality: QualityTab,
         decisions: DecisionsTab,
         projects: ProjectsTab,
@@ -815,7 +822,9 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function MessagesPanel({ messages, busy, onReplay }) {
+    function MessagesPanel({ messages, busy, onReplay, onBroadcast }) {
+      const [channel, setChannel] = useState('all')
+      const [broadcastText, setBroadcastText] = useState('')
       const [search, setSearch] = useState('')
       const filtered = search.trim() === ''
         ? messages
@@ -838,6 +847,22 @@ window.__ModuleLoader__.load({
               onChange: (event) => setSearch(event.target.value),
             })),
           search === '' ? null : h('p', { style: S.muted }, `本地过滤 ${filtered.length} / ${messages.length} 条（带 thread 的消息按线程分组显示）`),
+          h('div', { style: S.row },
+            h('span', { style: S.muted }, 'Owner 频道广播'),
+            h('select', { style: { ...S.input, maxWidth: 190 }, value: channel, onChange: (event) => setChannel(event.target.value) },
+              h('option', { value: 'all' }, '全体成员'),
+              ['pm', 'developer', 'reviewer', 'qa'].map((role) => h('option', { key: role, value: 'role:' + role }, '角色：' + role))),
+            h('input', {
+              style: { ...S.input, flex: 1, minWidth: 220 },
+              value: broadcastText,
+              placeholder: '向该频道发一条系统通告（会写入每个 Bot 的会话）',
+              onChange: (event) => setBroadcastText(event.target.value),
+            }),
+            h(Button, {
+              kind: 'primary',
+              disabled: busy !== '' || broadcastText.trim() === '',
+              onClick: () => { void onBroadcast(channel, broadcastText); setBroadcastText('') },
+            }, '广播')),
           h('p', { style: S.muted }, '已入队、已投递、已处理是三个不同状态：“已投递”只表示宿主接收了输入，“已处理”表示接收方 Bot 主动确认。'),
           h(Table, {
             columns: [
@@ -931,6 +956,36 @@ window.__ModuleLoader__.load({
           }),
           h('p', { style: S.muted }, `本项目共 ${tasks.length} 个任务。`),
         ),
+      )
+    }
+
+    function TimelinePanel({ timeline }) {
+      const [kind, setKind] = useState('')
+      const rows = (timeline ?? []).filter((row) => kind === '' || row.kind === kind)
+      const kinds = [...new Set((timeline ?? []).map((row) => row.kind))]
+      return h('div', { style: { display: 'grid', gap: 12, overflow: 'auto', minHeight: 0 } },
+        h('div', { style: S.card },
+          h('div', { style: S.row },
+            h('strong', { style: { fontSize: 13 } }, '时间线'),
+            h('span', { style: S.muted }, rows.length + ' 条（任务事件 / 审计 / 消息 / 检查 / 评审 / 审批 合并，最新在前）'),
+            h('span', { style: S.grow }),
+            h('select', { style: { ...S.input, maxWidth: 170 }, value: kind, onChange: (event) => setKind(event.target.value) },
+              h('option', { value: '' }, '全部类型'),
+              kinds.map((entry) => h('option', { key: entry, value: entry }, entry)))),
+          h(Table, {
+            columns: [
+              { key: 'at', title: '时间', render: (row) => when(row.at) },
+              { key: 'kind', title: '类型', render: (row) => h(Badge, {
+                value: row.kind === 'verification' ? 'PASS' : row.kind === 'review' ? 'IN_REVIEW' : row.kind === 'approval' ? 'NEEDS_HUMAN' : row.kind === 'message' ? 'QUEUED' : 'INCOMPLETE',
+                label: row.kind,
+              }) },
+              { key: 'actor', title: '操作者', render: (row) => h('span', { style: S.code }, row.actor) },
+              { key: 'summary', title: '内容', render: (row) => h('span', { style: { fontSize: 12 } }, row.summary) },
+              { key: 'task', title: '任务', render: (row) => row.taskId ?? '—' },
+            ],
+            rows,
+            empty: '还没有事件。',
+          })),
       )
     }
 

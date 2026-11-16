@@ -283,14 +283,3 @@ Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激
 - **未验证（本轮环境限制）**：节点拖动。CDP 坐标点落在宿主应用的标题元素上（`elementFromPoint` 返回 `H2.…title`），说明在该浏览器标签页里工作台与会话视图同时渲染、会话层在上，合成鼠标事件到不了画布；
   挂到节点上的探针收不到任何 `pointerdown`。因此「拖不动」是**测试环境现象**，尚不能判定为产品缺陷；下轮需在只渲染工作台的页面状态下重测。
 - 顺带加固：节点拖动改为按下时注册 window 级 `pointermove/pointerup`（会话结束即移除），不再依赖 pointer capture——即使画布被其它层覆盖也能正确结束手势。
-
-### 拖动验证的当前结论（2026-11-16）
-
-- 用 CDP 在真实页面上派发 `pointerdown → 6×pointermove → pointerup`，节点诊断日志收到 8 条 **`isTrusted: true`** 事件，
-  坐标与目标 Bot 都正确 —— 说明画布的指针处理链路是接通的，不是「点不到」。
-- 但该次拖动后 `canvas_nodes` 未变化，且节点在 DOM 里消失（选择器找不到），因此**拖动持久化尚未被证实**。
-  已修两处真实隐患：(1) 手势改用 window 级 `pointermove/pointerup`，不再依赖 pointer capture；
-  (2) `persist` 从 `setPositions` 的状态更新函数里移出，改为从 `positionsRef` 读取最新值后直接调用（在更新函数里做副作用
-  在 React 跳过更新或组件卸载时会被丢弃）。
-- 复现步骤（供下一次验证）：在浏览器标签页先点掉首启「预览版说明」弹窗 → 打开工作台 → Canvas → 确认节点 `elementFromPoint` 命中自身 →
-  拖动 → 读 `canvas_nodes`。

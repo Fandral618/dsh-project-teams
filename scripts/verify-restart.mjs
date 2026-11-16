@@ -141,6 +141,21 @@ try {
   const second = await boot('boot-2')
   summary.boots.push(second)
 
+  // AT-16: removing the bundle leaves no row in the profile and keeps the data.
+  const profileFile = join(home, 'profiles', profileName, 'package.json')
+  const listBundles = () => {
+    try {
+      return JSON.parse(readFileSync(profileFile, 'utf8')).dsh?.profile?.bundles ?? []
+    } catch {
+      return []
+    }
+  }
+  const installedBefore = listBundles().includes('dsh-project-teams')
+  await run(['plugin', '--profile', profileName, 'remove', 'dsh-project-teams'])
+  const installedAfter = listBundles().includes('dsh-project-teams')
+  const dataKept = existsSync(join(home, 'project-teams', 'project-teams.db'))
+  summary.uninstall = { installedBefore, installedAfter, dataKept }
+
   const verifyFiles = (second.stateFiles ?? []).filter((name) => name.startsWith('m0-verify-'))
   const latestVerify = verifyFiles.length === 0
     ? null
@@ -156,6 +171,7 @@ try {
     durableMarkerPresent: latestVerify.durableMarkerPresent,
   }
   const ok = first.ready && second.ready && latestVerify !== null && latestVerify.verdict === 'PASS'
+    && installedBefore && !installedAfter && dataKept
   summary.verdict = ok ? 'PASS' : 'BLOCKED'
 } catch (error) {
   summary.notes.push(`error: ${error instanceof Error ? error.message : String(error)}`)

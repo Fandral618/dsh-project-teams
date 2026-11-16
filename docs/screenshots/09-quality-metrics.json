@@ -1,0 +1,13 @@
+{
+  "_note": "Live quality metrics of the demo project, read from the running Host through the same service the 质量 (quality) workbench tab calls (pt_owner dashboard -> ProjectTeamsService.dashboard). Captured on 2026-11-16 while the panel was open. The tab itself is visible in 08-workbench-tabs.png; its rendered table could not be photographed because the Desktop session's screen DC was invalid (disconnected RDP session), so the values are recorded here and the table rendering is covered by the workbench code plus the dashboard tests.",
+  "_project": "prj_6c6b4ca69a73 (演示·账号系统)",
+  "method": "pt_owner action=dashboard",
+  "observed": {
+    "summary": "completion 20%, checks 100%, findings {\"minor\":1,\"nit\":4}",
+    "tasks": { "total": 5, "done": 1, "open": 3, "cancelled": 1, "completionRate": 20 },
+    "machineChecks": { "total": 4, "passed": 4, "failed": 0, "passRate": 100 },
+    "reviews": { "total": 2, "findings": { "minor": 1, "nit": 4 } },
+    "cost": { "messages": 58, "deadLetters": 0, "tokenBudgetPerRun": 400000, "tokenBudgetPerDay": 2000000 },
+    "approvals": { "pending": 2 }
+  }
+}

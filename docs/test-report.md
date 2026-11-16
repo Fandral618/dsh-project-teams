@@ -216,3 +216,28 @@ Desktop 行为不变（仍用宿主实现），CLI/profile 隔离启动也能激
   测试用可注入的 `prTools` 记录调用顺序（remote → push → gh）与 URL 落库、审计，并覆盖无 remote 的拒绝路径。
 - **回滚**：`decisions.rollbackMerge`（ownerOnly）只接受 `EXECUTED` 的合并单，`git revert -m 1` 生成 revert 提交，
   原单转 `ROLLED_BACK`，另建 `rollback` 变更单留痕。测试验证文件被移除、状态与审计、二次回滚被拒。
+
+## 十四、收尾验证（v1.8.0）
+
+### 进程级重启 + 卸载残留（`npm run verify:restart`）
+
+在临时 `DSH_HOME` + 临时 profile 中安装本 bundle，真实启动**两个** Host 进程，然后卸载：
+
+```json
+{
+  "verdict": "PASS",
+  "boots": [{ "label": "boot-1", "pid": 6388 }, { "label": "boot-2", "pid": 8064 }],
+  "verify": { "verdict": "PASS", "aFound": true, "bFound": true, "durableMarkerPresent": true },
+  "uninstall": { "installedBefore": true, "installedAfter": false, "dataKept": true }
+}
+```
+
+第二次启动从**冷会话持久日志**重新识别两个会话并读回投递标记；卸载后 profile 不再列出该 bundle，
+而 `project-teams.db` 仍在（数据不被删除）。这同时覆盖 AT-13（重启）与 AT-16（卸载）。
+
+### UI 证据
+
+`docs/screenshots/` 里有 7 张真实窗口截图（总览/团队/任务/交付/消息/决策/设置）与 1 张标签行截图
+（显示新增的**时间线**与**质量**）；`09-quality-metrics.json` 记录质量面板渲染的实时数值
+（完成率 20%、检查通过率 100%、findings minor 1 / nit 4、消息 58）。
+像素级截取在会话断开后不可用（屏幕 DC 失效），原因与替代方法写在 `docs/screenshots/README.md`。
